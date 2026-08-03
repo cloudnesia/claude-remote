@@ -7,6 +7,24 @@
     onnew,
   }: { onpair: () => void; onnew: (host: HostMeta) => void } = $props()
 
+  /** Host yang menunggu konfirmasi lepas. Dua langkah, bukan modal. */
+  let confirming = $state<string | null>(null)
+  let timer: ReturnType<typeof setTimeout> | null = null
+
+  function askUnbind(hostId: string) {
+    confirming = hostId
+    if (timer) clearTimeout(timer)
+    // Batalkan sendiri kalau ditinggal: tombol merah yang menetap gampang
+    // tertekan tanpa sengaja belakangan.
+    timer = setTimeout(() => (confirming = null), 5000)
+  }
+
+  function doUnbind(hostId: string) {
+    if (timer) clearTimeout(timer)
+    confirming = null
+    store.unbindHost(hostId)
+  }
+
   const dot: Record<string, string> = {
     idle: '#5a6270',
     thinking: '#4a9eff',
@@ -34,12 +52,30 @@
 
       {#each user.hosts as host (host.id)}
         <div class="host">
-          <span class="host-name" class:off={!host.online}>
-            {host.online ? '●' : '○'}
+          <span class="host-name" class:off={!host.online} class:revoked={host.revoked}>
+            {host.revoked ? '⊘' : host.online ? '●' : '○'}
             {host.name}
+            {#if host.revoked}<span class="tag">dilepas</span>{/if}
           </span>
-          {#if host.online && user.id === store.me}
-            <button class="add" onclick={() => onnew(host)} title="Session baru">+</button>
+          {#if user.id === store.me && !host.revoked}
+            <span class="hostacts">
+              {#if host.online}
+                <button class="add" onclick={() => onnew(host)} title="Session baru">+</button>
+              {/if}
+              {#if confirming === host.id}
+                <button class="unbind confirm" onclick={() => doUnbind(host.id)}>
+                  yakin lepas?
+                </button>
+              {:else}
+                <button
+                  class="unbind"
+                  onclick={() => askUnbind(host.id)}
+                  title="Cabut pairing laptop ini"
+                >
+                  lepas
+                </button>
+              {/if}
+            </span>
           {/if}
         </div>
 
@@ -139,6 +175,45 @@
   }
   .host-name.off {
     color: #4b515c;
+  }
+  .hostacts {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: none;
+  }
+  .host-name.revoked {
+    color: #4b515c;
+    text-decoration: line-through;
+  }
+  .tag {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6b7280;
+    text-decoration: none;
+    margin-left: 3px;
+  }
+  .unbind {
+    background: none;
+    border: none;
+    color: #4b515c;
+    font: inherit;
+    font-size: 10px;
+    padding: 0 3px;
+    cursor: pointer;
+    opacity: 0;
+  }
+  .host:hover .unbind {
+    opacity: 1;
+  }
+  .unbind:hover {
+    color: #e5534b;
+  }
+  .unbind.confirm {
+    opacity: 1;
+    color: #e5534b;
+    font-weight: 600;
   }
   .add {
     background: none;

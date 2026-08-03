@@ -103,6 +103,9 @@ export type HubToAgent =
       sessions: SessionSpec[]
     }
   | { t: 'set_auto'; sessionId: string; auto: boolean }
+  | { t: 'set_model'; sessionId: string; model: string | null }
+  /** Pairing dicabut hub. Agent membuang config lalu berhenti. */
+  | { t: 'revoked'; reason: string }
   | { t: 'browse'; reqId: string; path: string }
   | { t: 'create_session'; sessionId: string; cwd: string; title: string; auto: boolean }
   | { t: 'prompt'; sessionId: string; text: string }
@@ -139,6 +142,8 @@ export type BrowserToHub =
   | { t: 'set_auto'; sessionId: string; auto: boolean }
   /** Ganti model. `null` = kembali ke default. Owner saja. */
   | { t: 'set_model'; sessionId: string; model: string | null }
+  /** Cabut pairing sebuah laptop. Owner host saja. */
+  | { t: 'unbind_host'; hostId: string }
 
 export type Visibility = 'private' | 'team' | 'public'
 
@@ -161,6 +166,8 @@ export type HostMeta = {
   name: string
   platform: string
   online: boolean
+  /** Pairing sudah dicabut; token mati dan laptop tidak bisa menyambung lagi. */
+  revoked: boolean
   /** Kosong sampai agent selesai mengenumerasi (butuh Claude Code hidup). */
   models: ModelInfo[]
   sessions: SessionMeta[]

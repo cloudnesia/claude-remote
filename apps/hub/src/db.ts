@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
+import { randomBytes } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { Message, SessionMeta, UserMeta, Visibility } from '@company/protocol'
@@ -79,12 +80,14 @@ function addColumn(table: string, column: string, decl: string): void {
 addColumn('sessions', 'auto', 'INTEGER NOT NULL DEFAULT 0')
 addColumn('sessions', 'model', 'TEXT')
 addColumn('hosts', 'models', "TEXT NOT NULL DEFAULT '[]'")
+addColumn('hosts', 'revoked', 'INTEGER NOT NULL DEFAULT 0')
 
 // ------------------------------------------------------------------ queries
 
 const q = {
   userByToken: db.prepare('SELECT * FROM users WHERE token = ?'),
-  hostByToken: db.prepare('SELECT * FROM hosts WHERE token = ?'),
+  // Host yang sudah dicabut tidak boleh cocok, bahkan kalau token lamanya bocor.
+  hostByToken: db.prepare('SELECT * FROM hosts WHERE token = ? AND revoked = 0'),
   hostById: db.prepare('SELECT * FROM hosts WHERE id = ?'),
   allUsers: db.prepare('SELECT * FROM users ORDER BY name'),
   hostsOf: db.prepare('SELECT * FROM hosts WHERE owner_id = ? ORDER BY name'),
@@ -116,6 +119,7 @@ export type HostRow = {
   platform: string
   token: string
   models: string
+  revoked: number
   last_seen: number
 }
 export type SessionRow = {
@@ -167,6 +171,35 @@ export function setAuto(sessionId: string, auto: boolean): void {
 
 export function setModel(sessionId: string, model: string | null): void {
   q.setModel.run(model, sessionId)
+}
+
+/**
+ * Cabut pairing sebuah laptop.
+ *
+ * Token juga dirotasi, bukan cuma ditandai: kalau nilai lamanya sempat bocor
+ * (itu justru alasan orang menekan tombol ini), menandai saja menyisakan
+ * rahasia yang masih bisa dicocokkan seandainya flag pernah terlewat di
+ * suatu query.
+ *
+ * Host yang tidak punya session dihapus sekalian supaya daftar tetap bersih.
+ * Yang punya session DIPERTAHANKAN — menghapusnya akan ikut membawa seluruh
+ * transcript, dan mencabut kredensial bukan alasan untuk menghancurkan riwayat.
+ */
+export function revokeHost(hostId: string): { deleted: boolean } {
+  const n = (
+    db.prepare('SELECT COUNT(*) c FROM sessions WHERE host_id = ?').get(hostId) as { c: number }
+  ).c
+
+  if (n === 0) {
+    db.prepare('DELETE FROM hosts WHERE id = ?').run(hostId)
+    return { deleted: true }
+  }
+
+  db.prepare('UPDATE hosts SET revoked = 1, token = ? WHERE id = ?').run(
+    `revoked_${randomBytes(16).toString('hex')}`,
+    hostId,
+  )
+  return { deleted: false }
 }
 
 export function setHostModels(hostId: string, models: unknown): void {
@@ -243,6 +276,7 @@ export function roster(
       name: h.name,
       platform: h.platform,
       online: isOnline(h.id),
+      revoked: !!h.revoked,
       models: JSON.parse(h.models || '[]'),
       sessions: (q.sessionsOf.all(h.id) as SessionRow[])
         .filter((s) => s.visibility !== 'private' || s.owner_id === visibleTo)

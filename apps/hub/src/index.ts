@@ -279,6 +279,31 @@ function onBrowser(ws: WebSocket, user: db.UserRow): void {
       return
     }
 
+    if (m.t === 'unbind_host') {
+      const host = db.hostById(m.hostId)
+      if (!host || host.owner_id !== user.id) {
+        return sendBrowser(conn, { t: 'denied', action: m.t, reason: 'bukan host milikmu' })
+      }
+
+      // Beri tahu agent lebih dulu supaya ia membuang config-nya sendiri.
+      // Ini kebersihan untuk kasus normal (pensiunkan mesin), BUKAN kontrol
+      // keamanan — laptop yang hilang jelas bisa mengabaikannya. Yang
+      // menentukan adalah token yang sudah mati di sisi hub.
+      sendAgent(host.id, { t: 'revoked', reason: 'pairing dicabut dari web' })
+
+      const { deleted } = db.revokeHost(host.id)
+      const conn2 = agents.get(host.id)
+      if (conn2) {
+        agents.delete(host.id)
+        setTimeout(() => conn2.ws.close(CLOSE.FORBIDDEN, 'revoked'), 200)
+        markHostOffline(db.sessionIdsOfHost(host.id))
+        broadcastHostStatus(host.id, false)
+      }
+      console.log(`[hub] host ${host.name} dicabut${deleted ? ' dan dihapus' : ''}`)
+      broadcastRoster()
+      return
+    }
+
     if (m.t === 'new_session') {
       const host = db.hostById(m.hostId)
       if (!host || host.owner_id !== user.id) {

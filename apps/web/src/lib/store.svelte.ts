@@ -305,6 +305,11 @@ class Store {
     this.#send({ t: 'set_auto', sessionId, auto })
   }
 
+  /** Cabut pairing sebuah laptop. Tidak bisa dibatalkan — harus pairing ulang. */
+  unbindHost(hostId: string): void {
+    this.#send({ t: 'unbind_host', hostId })
+  }
+
   /** Minta daftar subdirektori di host. `path` kosong = home host. */
   browse(hostId: string, path: string): void {
     this.browseBusy = true

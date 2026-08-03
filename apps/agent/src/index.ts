@@ -198,6 +198,14 @@ function connect(): void {
         break
       }
 
+      case 'revoked': {
+        console.error(`\n[agent] Pairing laptop ini dicabut (${m.reason}).`)
+        console.error('        Jalankan `company-agent login` untuk memasangkan ulang.\n')
+        config.clear()
+        for (const r of runners.values()) r.stop()
+        process.exit(0)
+      }
+
       case 'browse':
         // Hub sudah memastikan peminta adalah owner host ini.
         send({ t: 'browse_result', reqId: m.reqId, result: browse(m.path) })

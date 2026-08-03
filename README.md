@@ -84,6 +84,96 @@ git tag v0.1.0 && git push --tags
 masing-masing — Node SEA menyuntik blob ke binary `node` milik runner, jadi
 cross-compile mustahil. Build lokal untuk platform sendiri: `npm run build:agent`.
 
+## Deploy hub di belakang nginx
+
+Hub bisa ditaruh di belakang nginx seperti aplikasi WebSocket lain. Satu server
+block menyajikan UI statis sekaligus mem-proxy hub, jadi UI dan API berada di
+origin yang sama dan CORS tidak lagi relevan.
+
+```nginx
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  ''      close;
+}
+
+server {
+  listen 443 ssl;
+  server_name hub.perusahaan.com;
+
+  ssl_certificate     /etc/letsencrypt/live/hub.perusahaan.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/hub.perusahaan.com/privkey.pem;
+
+  # UI statis hasil `npm run build --workspace=web` (apps/web/build)
+  root /srv/claude-remote/web;
+  location / { try_files $uri $uri/ /index.html; }   # SPA fallback
+
+  # WebSocket — browser (/ws) dan agent (/agent)
+  location ~ ^/(ws|agent)$ {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    proxy_read_timeout 3600s;   # WAJIB — lihat catatan di bawah
+    proxy_send_timeout 3600s;
+    proxy_buffering off;
+  }
+
+  # HTTP — /me, /pair/*, /health
+  location ~ ^/(me|health|pair/.+)$ {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+```
+
+Agent cukup diarahkan ke domainnya:
+
+```sh
+HUB_URL=wss://hub.perusahaan.com company-agent login
+```
+
+Konversi ke HTTP untuk endpoint pairing terjadi otomatis dan benar —
+`wss://` menjadi `https://`.
+
+### Kenapa `proxy_read_timeout` wajib dinaikkan
+
+Ini menutupi kekurangan di sisi hub, bukan sekadar tuning. Heartbeat hub hanya
+mem-ping koneksi **agent**; koneksi **browser** tidak pernah di-ping. Saat
+seseorang hanya menonton session yang sedang diam, tidak ada trafik sama sekali
+di koneksi itu, dan nginx dengan default 60 detik akan memutusnya tiap menit.
+
+Klien memang auto-reconnect, jadi tidak ada yang rusak — tapi setiap reconnect
+menarik ulang snapshot transcript penuh. Pada transcript panjang itu pemborosan
+berulang, dan indikator koneksi berkedip terus.
+
+Menaikkan timeout memperbaikinya di nginx yang kamu kendalikan. Yang tidak
+tertolong: Cloudflare, load balancer cloud, atau proxy korporat di jalur, yang
+punya batas idle sendiri. Perbaikan sebenarnya adalah mem-ping browser juga —
+belum dikerjakan, tercatat di bagian "Belum ada".
+
+### Alamat hub masih ditanam saat build
+
+```js
+const HUB = import.meta.env.VITE_HUB_URL ?? 'ws://localhost:8787'
+```
+
+Untuk deployment di atas, build UI-nya dengan:
+
+```sh
+VITE_HUB_URL=wss://hub.perusahaan.com npm run build --workspace=web
+```
+
+Artinya satu build terikat ke satu domain. Karena setup nginx ini selalu
+same-origin, sebenarnya alamat itu bisa diturunkan dari `location` saat runtime
+sehingga satu build statis jalan di domain mana pun — juga belum dikerjakan.
+
+## Pemakaian
+
 ### Bikin session & pilih project directory
 
 Klik **+** di sebelah nama host yang online di sidebar. Dialognya menjelajahi
@@ -94,6 +184,25 @@ Daftar direktori dibaca dari host lewat agent, bukan ditebak browser: browser
 tidak tahu apa-apa soal filesystem laptop itu. Hanya owner host yang boleh
 menjelajah, dan hanya direktori yang ditampilkan (dotdir dan `node_modules`
 disembunyikan).
+
+### Melepas laptop
+
+Arahkan kursor ke nama host di sidebar, klik **lepas**, lalu klik sekali lagi
+untuk konfirmasi (tombolnya batal sendiri setelah 5 detik). Owner host saja.
+
+Yang terjadi:
+
+- Token host dicabut **dan dirotasi**, bukan sekadar ditandai — kalau nilai
+  lamanya sempat bocor, menandai saja menyisakan rahasia yang masih hidup.
+- Agent yang sedang tersambung diberi tahu, membuang `config.json`-nya, lalu
+  berhenti. Ini kebersihan untuk kasus normal, **bukan** kontrol keamanan:
+  laptop yang hilang bisa saja mengabaikannya. Yang menentukan adalah token
+  yang sudah mati di hub.
+- Host tanpa session dihapus dari daftar. Host yang punya session
+  **dipertahankan** sebagai arsip, ditandai `dilepas`, transcript tetap bisa
+  dibaca — mencabut kredensial bukan alasan menghancurkan riwayat.
+
+Tidak bisa dibatalkan; laptop itu harus `company-agent login` lagi.
 
 ### Ganti model
 
@@ -164,6 +273,9 @@ Rinciannya di `docs/PROTOCOL.md` §5.
 - Penjelajahan direktori host, dan session dibuat dari path hasil penjelajahan
 - Auto mode: tool jalan tanpa `approval_req`; dimatikan lagi → minta izin lagi
 - cwd salah → error jelas di transcript, agent tetap hidup
+- Lepas laptop: token mati (401 saat coba sambung lagi), agent membuang config
+  dan berhenti, host tanpa session terhapus, host bertranscript jadi arsip,
+  dan user lain ditolak hub saat mencoba mencabut host orang
 - Ganti model: enumerasi dari host, berpindah saat proses hidup, dan
   diverifikasi lewat session bersih di kedua arah (haiku ↔ opus)
 
@@ -174,7 +286,13 @@ Rinciannya di `docs/PROTOCOL.md` §5.
 - **Eviction idle** sudah ditulis (`IDLE_MS`, default 10 menit) tapi belum
   diuji di bawah kondisi idle sungguhan.
 - **Hapus session** — `close_session` ada di protokol tapi belum ada tombolnya.
+- **Heartbeat ke browser** — hub hanya mem-ping agent, sehingga koneksi browser
+  yang idle diputus oleh proxy dengan batas idle pendek. Detail dan dampaknya
+  di bagian nginx di atas.
+- **Alamat hub same-origin** — masih ditanam saat build lewat `VITE_HUB_URL`,
+  jadi satu build terikat ke satu domain.
+- **Agent belum bisa diberi alamat hub lewat argumen** — hanya `HUB_URL`, yang
+  tidak terlihat dari `install.sh`, sehingga `company-agent login` di laptop
+  orang lain menembak `localhost` dan gagal tanpa petunjuk.
 - **Virtualisasi transcript** — akan terasa berat di atas beberapa ribu blok.
 - **Visibility belum bisa diubah dari UI** (default `team`, kolomnya sudah ada).
-- **Revoke host** — bisa `company-agent logout` di laptopnya, tapi belum ada
-  cara mencabut token dari sisi web kalau laptopnya hilang.

@@ -1,0 +1,18 @@
+{
+  "name": "company",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "hub": "node --env-file-if-exists=.env apps/hub/src/index.ts",
+    "agent": "node --env-file-if-exists=.env apps/agent/src/index.ts",
+    "web": "npm run dev --workspace=web",
+    "seed": "node apps/hub/src/seed.ts"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@company/hub",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@company/protocol": "*",
+    "ws": "^8.21.1"
+  }
+}

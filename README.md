@@ -30,7 +30,7 @@ npm run web           # terminal 2
 Lalu hubungkan laptop lewat **device-code pairing**, seperti `gh auth login`:
 
 ```bash
-npm run agent -- login    # di laptop yang mau dihubungkan
+npm run agent -- login    # di laptop yang mau dihubungkan (dari source)
 #   Buka  http://localhost:5173  lalu masukkan kode ini:
 #       F98M-VUU2
 ```
@@ -50,6 +50,40 @@ di laptopnya sebagai proses lokal biasa.
 bisa langsung dicoba. Login user sungguhan belum ada; token seeder masih jadi
 satu-satunya cara masuk ke web.
 
+## Memasang agent di laptop lain
+
+Pengguna lain tidak perlu clone repo ini:
+
+```sh
+curl -fsSL https://github.com/cloudnesia/claude-remote/releases/latest/download/install.sh | sh
+company-agent login
+company-agent start
+```
+
+Binary-nya mandiri (Node ter-embed, ~118 MB) untuk `linux-x64`, `linux-arm64`,
+`darwin-x64`, `darwin-arm64`. Installer memverifikasi checksum SHA-256 dan
+tidak memasang apa pun kalau tidak cocok.
+
+Yang **tidak** ikut dipaket: Claude Code itu sendiri. Ukurannya 275 MB, dan
+yang dibutuhkan justru instalasi yang sudah login di mesin itu. Agent
+mencarinya saat runtime di `PATH`, `~/.local/bin`, `~/.claude/local`,
+`/usr/local/bin`, dan `/opt/homebrew/bin` — atau tunjuk manual dengan
+`CLAUDE_BIN=/path/ke/claude`.
+
+Efek sampingnya menguntungkan: karena memakai Claude Code milik user, daftar
+model ikut versinya. Di mesin dengan CLI terbaru muncul Sonnet 5 / Opus 5 /
+Fable 5 / Haiku, sedangkan cli.js bawaan SDK hanya menawarkan tiga.
+
+Rilis dipicu dengan tag:
+
+```sh
+git tag v0.1.0 && git push --tags
+```
+
+`.github/workflows/release.yml` membangun keempat target di runner-nya
+masing-masing — Node SEA menyuntik blob ke binary `node` milik runner, jadi
+cross-compile mustahil. Build lokal untuk platform sendiri: `npm run build:agent`.
+
 ### Bikin session & pilih project directory
 
 Klik **+** di sebelah nama host yang online di sidebar. Dialognya menjelajahi
@@ -60,6 +94,15 @@ Daftar direktori dibaca dari host lewat agent, bukan ditebak browser: browser
 tidak tahu apa-apa soal filesystem laptop itu. Hanya owner host yang boleh
 menjelajah, dan hanya direktori yang ditampilkan (dotdir dan `node_modules`
 disembunyikan).
+
+### Ganti model
+
+Dropdown di header pane, per session, owner saja. Isinya dienumerasi dari
+Claude Code di laptop itu — bukan daftar hardcode — jadi selalu cocok dengan
+akun dan versi CLI di sana.
+
+Kalau session sedang berjalan, model berpindah saat itu juga tanpa restart.
+Kalau sedang cold, dipakai saat proses berikutnya dinyalakan.
 
 ### Auto mode
 
@@ -121,6 +164,8 @@ Rinciannya di `docs/PROTOCOL.md` §5.
 - Penjelajahan direktori host, dan session dibuat dari path hasil penjelajahan
 - Auto mode: tool jalan tanpa `approval_req`; dimatikan lagi → minta izin lagi
 - cwd salah → error jelas di transcript, agent tetap hidup
+- Ganti model: enumerasi dari host, berpindah saat proses hidup, dan
+  diverifikasi lewat session bersih di kedua arah (haiku ↔ opus)
 
 ## Belum ada
 

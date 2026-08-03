@@ -13,6 +13,11 @@
     "hub": "node --env-file-if-exists=.env apps/hub/src/index.ts",
     "agent": "node --env-file-if-exists=.env apps/agent/src/index.ts",
     "web": "npm run dev --workspace=web",
-    "seed": "node apps/hub/src/seed.ts"
+    "seed": "node apps/hub/src/seed.ts",
+    "build:agent": "node apps/agent/build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "postject": "^1.0.0-alpha.6"
   }
 }

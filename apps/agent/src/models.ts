@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ModelInfo } from '@company/protocol'
 import { DIR } from './config.ts'
+import { claudeSpawnOptions } from './claude.ts'
 
 const FILE = join(DIR, 'models.json')
 
@@ -26,7 +27,7 @@ export async function enumerate(cwd: string): Promise<ModelInfo[]> {
     await closed
   }
 
-  const q = query({ prompt: idle(), options: { cwd } })
+  const q = query({ prompt: idle(), options: { cwd, ...claudeSpawnOptions() } })
   try {
     return (await q.supportedModels()) as ModelInfo[]
   } finally {

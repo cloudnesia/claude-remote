@@ -6,6 +6,7 @@ import {
   type Frame,
   type HubToBrowser,
   type Message,
+  type ModelInfo,
   type SessionMeta,
   type UserMeta,
 } from '@company/protocol'
@@ -141,8 +142,10 @@ class Store {
           seq: m.seq,
           canPrompt: m.canPrompt,
           pending: m.pendingApproval,
-          auto: m.auto,
-          model: m.model,
+          // Default eksplisit dengan alasan yang sama seperti `modelsFor`:
+          // hub versi lama tidak mengirim field ini sama sekali.
+          auto: m.auto ?? false,
+          model: m.model ?? null,
           loaded: true,
           draft,
         }
@@ -274,12 +277,18 @@ class Store {
     this.#send({ t: 'new_session', hostId, cwd, title })
   }
 
-  /** Daftar model host pemilik session ini (kosong kalau belum dienumerasi). */
-  modelsFor(sessionId: string) {
+  /**
+   * Daftar model host pemilik session ini (kosong kalau belum dienumerasi).
+   *
+   * `?? []` bukan basa-basi: hub dan web di-deploy terpisah, jadi hub versi
+   * lama akan mengirim roster tanpa field ini. Field yang hilang harus jadi
+   * fitur yang tidak muncul, bukan halaman yang mati.
+   */
+  modelsFor(sessionId: string): ModelInfo[] {
     const meta = this.meta(sessionId)
     if (!meta) return []
     for (const u of this.users) {
-      for (const h of u.hosts) if (h.id === meta.hostId) return h.models
+      for (const h of u.hosts) if (h.id === meta.hostId) return h.models ?? []
     }
     return []
   }

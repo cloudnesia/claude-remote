@@ -83,6 +83,7 @@ bikin sistem jalan dari wifi kafe / di belakang NAT.
 | `hello`          | `hostId`, `resumeFrom`, `sessions[]`    | frame pertama setelah auth |
 | `create_session` | `sessionId`, `cwd`, `title`, `auto`     | buat session baru |
 | `set_auto`       | `sessionId`, `auto`                     | auto-approve semua tool |
+| `set_model`      | `sessionId`, `model`                    | ganti model; `null` = default |
 | `browse`         | `reqId`, `path`                         | daftar subdirektori di host |
 | `prompt`         | `sessionId`, `text`                     | suntik prompt (owner sudah divalidasi hub) |
 | `interrupt`      | `sessionId`                             | setara ESC |
@@ -134,6 +135,7 @@ replay setelah reconnect.
 | `session_state`   | `sessionId`, `alive`, `claudeSessionId?`, `cwd` | lapor proses hidup/mati (juga saat reconnect) |
 | `frame`           | `Frame`                                         | event stream |
 | `browse_result`   | `reqId`, `result`                               | jawaban `browse` |
+| `models`          | `models: ModelInfo[]`                           | model yang tersedia di host |
 | `pong`            | —                                               | balasan heartbeat |
 
 ---
@@ -151,6 +153,7 @@ replay setelah reconnect.
 | `approve`     | `sessionId`, `reqId`, `decision`   | owner saja |
 | `new_session` | `hostId`, `cwd`, `title`           | owner host saja, host wajib online |
 | `set_auto`    | `sessionId`, `auto`                | owner saja |
+| `set_model`   | `sessionId`, `model`               | owner saja |
 | `browse`      | `hostId`, `path`                   | owner host saja |
 
 ### Hub → Browser
@@ -214,7 +217,33 @@ di-approve owner sebelum dieksekusi.
 
 ---
 
-## 8. Auto mode
+## 8. Pemilihan model
+
+Daftar model **ditanyakan ke host**, tidak pernah ditebak hub: yang tersedia
+bergantung pada akun dan versi CLI di laptop itu. Agent memanggil
+`supportedModels()` — sebuah control request yang butuh proses Claude Code
+hidup tapi **tidak melakukan inference sama sekali**, jadi gratis dari sisi
+token (~2 detik spawn).
+
+Hasilnya di-cache ke `~/.company-agent/models.json` dan dikirim lebih dulu saat
+`hello`, supaya UI langsung terisi; enumerasi ulang jalan di belakang untuk
+menangkap perubahan tanpa menahan startup.
+
+Penerapannya dua jalur, tergantung session sedang hidup atau tidak:
+
+| kondisi | cara |
+|---------|------|
+| proses hidup | `Query.setModel()` — berpindah saat itu juga, tanpa restart |
+| session cold | disimpan saja, dipakai lewat `options.model` saat spawn berikutnya |
+
+Satu jebakan saat menguji ini: **jangan percaya model menyebut namanya
+sendiri.** Dalam satu percakapan yang sudah berjalan, model cenderung meniru
+jawaban giliran sebelumnya, jadi setelah pindah dari Opus ke Haiku ia masih
+menjawab "Opus". Bukti yang benar ada di `modelUsage` pada pesan `result`
+(sifatnya kumulatif — model baru muncul sebagai key tambahan), atau uji dengan
+session yang benar-benar baru.
+
+## 9. Auto mode
 
 `set_auto` membuat `canUseTool` di agent langsung mengizinkan setiap tool
 tanpa menunggu owner. Nilainya per-session, tersimpan di DB hub dan di
@@ -229,7 +258,7 @@ viewer supaya tidak ada session yang diam-diam berjalan tanpa pengawasan.
 
 ---
 
-## 9. Device-code pairing (HTTP, di luar WS)
+## 10. Device-code pairing (HTTP, di luar WS)
 
 Agent tidak pernah menyentuh kredensial user, dan user tidak pernah menyalin
 token panjang.

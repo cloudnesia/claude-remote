@@ -8,8 +8,9 @@ import { browse } from './fs.ts'
 import * as models from './models.ts'
 import * as config from './config.ts'
 import { login } from './login.ts'
+import { isPackaged, resolveClaudeBin } from './claude.ts'
 
-const VERSION = '1.0.0'
+const VERSION = process.env.AGENT_VERSION ?? 'dev'
 
 const cfg = config.read()
 const HUB = process.env.HUB_URL ?? cfg?.hubUrl ?? 'ws://localhost:8787'
@@ -281,6 +282,15 @@ if (cmd === 'login') {
   config.clear()
   console.log('Token host dihapus. Session lokal tetap ada; `login` lagi untuk menyambung.')
 } else if (cmd === 'start') {
+  // Binary hasil paket tidak membawa Claude Code sendiri; tanpa ini kegagalan
+  // baru muncul saat prompt pertama, dalam bentuk error spawn yang tidak
+  // menjelaskan apa pun.
+  if (isPackaged() && !resolveClaudeBin()) {
+    console.error('\nClaude Code tidak ditemukan di mesin ini.')
+    console.error('Pasang dulu: https://claude.com/download')
+    console.error('Atau tunjuk manual: CLAUDE_BIN=/path/ke/claude company-agent start\n')
+    process.exit(1)
+  }
   if (!TOKEN) {
     console.error('Belum dipasangkan. Jalankan: company-agent login')
     process.exit(1)

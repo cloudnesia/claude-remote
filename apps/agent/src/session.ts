@@ -2,6 +2,7 @@ import { query, type Query } from '@anthropic-ai/claude-agent-sdk'
 import type { Decision, Ev, Frame } from '@company/protocol'
 import { Outbox } from './outbox.ts'
 import { checkCwd } from './fs.ts'
+import { claudeSpawnOptions } from './claude.ts'
 
 /** Session tanpa aktivitas selama ini akan dimatikan prosesnya (jadi "cold"). */
 const IDLE_MS = Number(process.env.IDLE_MS ?? 10 * 60_000)
@@ -178,6 +179,7 @@ export class SessionRunner {
       prompt: this.queue,
       options: {
         cwd: check.path,
+        ...claudeSpawnOptions(),
         ...(this.model ? { model: this.model } : {}),
         // Kalau ada, lanjutkan percakapan lama alih-alih mulai dari nol.
         ...(this.claudeSessionId ? { resume: this.claudeSessionId } : {}),

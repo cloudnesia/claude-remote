@@ -24,6 +24,9 @@ import {
 } from './live.ts'
 
 const PORT = Number(process.env.PORT ?? 8787)
+// Bind ke 127.0.0.1 kalau ada reverse proxy di depan; default terbuka supaya
+// pemasangan tanpa proxy tetap jalan.
+const HOST = process.env.HOST ?? '0.0.0.0'
 const HEARTBEAT_MS = 20_000
 
 // -------------------------------------------------------------- connections
@@ -429,6 +432,6 @@ setInterval(() => {
   }
 }, HEARTBEAT_MS).unref()
 
-server.listen(PORT, () => {
-  console.log(`[hub] listening on :${PORT}  (ws /agent, ws /ws)`)
+server.listen(PORT, HOST, () => {
+  console.log(`[hub] listening on ${HOST}:${PORT}  (ws /agent, ws /ws)`)
 })

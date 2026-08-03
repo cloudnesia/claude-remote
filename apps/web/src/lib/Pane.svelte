@@ -239,17 +239,22 @@
   .icon {
     background: #2b2f38;
     border: 1px solid #3a3f4a;
-    color: #9aa3b2;
+    color: #c9d1d9;
     border-radius: 5px;
-    width: 22px;
-    height: 22px;
+    width: 28px;
+    height: 28px;
     line-height: 1;
-    font-size: 11px;
+    font-size: 14px;
     cursor: pointer;
     padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   .icon:hover {
-    color: #e6e9ef;
+    color: #fff;
+    border-color: #4a9eff;
+    background: #3a4759;
   }
   .blank {
     flex: 1;
@@ -350,5 +355,67 @@
     background: #2b2f38;
     color: #6b7280;
     cursor: default;
+  }
+
+  /* Mobile responsive */
+  @media (max-width: 768px) {
+    header {
+      padding: 8px 12px;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .id {
+      flex: 1 1 100%;
+    }
+    .title {
+      font-size: 15px;
+    }
+    .sub {
+      font-size: 10px;
+    }
+    .right {
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .icon {
+      width: 32px;
+      height: 32px;
+      font-size: 15px;
+    }
+    .composer {
+      padding: 10px 12px;
+    }
+    textarea {
+      font-size: 14px;
+      padding: 10px 12px;
+    }
+    .composer button {
+      font-size: 14px;
+      padding: 0 18px;
+    }
+    .model {
+      font-size: 12px;
+      padding: 4px 6px;
+    }
+    .auto {
+      font-size: 11px;
+      padding: 4px 8px;
+    }
+    .status {
+      font-size: 12px;
+    }
+    .approval {
+      margin: 8px 12px 0;
+      padding: 8px 10px;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .acts {
+      width: 100%;
+      justify-content: stretch;
+    }
+    .acts button {
+      flex: 1;
+    }
   }
 </style>

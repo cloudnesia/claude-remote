@@ -181,4 +181,41 @@
     font-size: 13px;
     z-index: 10;
   }
+
+  /* Mobile responsive design */
+  @media (max-width: 768px) {
+    .app {
+      flex-direction: column;
+    }
+    main {
+      height: calc(100vh - 60px);
+    }
+    .blank {
+      font-size: 13px;
+      padding: 0 20px;
+      text-align: center;
+    }
+    .tip {
+      font-size: 11px;
+    }
+    .login form {
+      width: 90%;
+      max-width: 320px;
+      padding: 0 20px;
+    }
+    .toast {
+      left: 10px;
+      right: 10px;
+      transform: none;
+      max-width: calc(100vw - 20px);
+    }
+  }
+
+  /* Touch devices - larger tap targets */
+  @media (pointer: coarse) {
+    :global(button), :global(a), :global(input), :global(select) {
+      min-height: 44px;
+      min-width: 44px;
+    }
+  }
 </style>

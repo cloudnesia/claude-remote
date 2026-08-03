@@ -1,5 +1,5 @@
 /**
- * Seed dev. Bikin dua user + satu host masing-masing, lalu cetak tokennya.
+ * Seed dev. Bikin user + host untuk development, lalu cetak tokennya.
  * Idempotent — aman dijalankan berulang.
  *
  * Ini BUKAN pengganti device-code pairing untuk produksi; ini cuma supaya
@@ -12,7 +12,6 @@ const tok = (p: string) => `${p}_${randomBytes(12).toString('hex')}`
 
 const people = [
   { id: 'u_savana', name: 'Savana', host: 'Savana-Laptop' },
-  { id: 'u_rekan', name: 'Rekan', host: 'Rekan-Desktop' },
 ]
 
 const insUser = db.prepare('INSERT OR IGNORE INTO users (id, name, token) VALUES (?, ?, ?)')

@@ -84,6 +84,54 @@ git tag v0.1.0 && git push --tags
 masing-masing — Node SEA menyuntik blob ke binary `node` milik runner, jadi
 cross-compile mustahil. Build lokal untuk platform sendiri: `npm run build:agent`.
 
+## Pasang server (hub + web) sekali jalan
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cloudnesia/claude-remote/main/install-server.sh | sudo sh
+```
+
+Atau dari dalam checkout: `sudo sh install-server.sh`.
+
+Satu panggilan menyiapkan **dua service systemd terpisah**:
+
+| service | isi |
+|---------|-----|
+| `claude-hub.service` | relay WebSocket + SQLite, port 8787 |
+| `claude-web.service` | UI statis lewat `apps/web/serve.mjs`, port 8080 |
+
+Dipisah karena keduanya punya siklus hidup berbeda: hub memegang koneksi
+panjang dan state, web hanya menyajikan file. Restart UI tidak boleh memutus
+session siapa pun.
+
+Yang dilakukan script:
+
+- Memakai Node sistem kalau ≥24, kalau tidak mengunduh Node resmi ke
+  `/opt/claude-remote/node` — tidak mengotori paket sistem.
+- Mengambil sumber dari checkout (isi direktori kerja, minus yang di-gitignore)
+  atau `git clone` kalau dijalankan lewat curl.
+- `npm ci`, lalu build UI dengan `VITE_HUB_URL` yang ditanam.
+- Membuat user sistem `claude-remote`, DB di `/var/lib/claude-remote`.
+- Menulis unit dengan pengetatan (`ProtectSystem=strict`, `NoNewPrivileges`,
+  `ProtectHome`) — service hanya bisa menulis ke direktori state-nya.
+- Seed user awal **hanya kalau DB belum ada**, lalu mencetak tokennya.
+
+Variabel yang sering dipakai:
+
+```sh
+HUB_URL=wss://hub.contoh.com BIND=127.0.0.1 sudo -E sh install-server.sh
+```
+
+`HUB_URL` **ditanam saat build**, jadi ganti domain berarti jalankan ulang
+script-nya. `BIND=127.0.0.1` untuk pemasangan di belakang nginx; default
+`0.0.0.0` supaya VPS tanpa proxy langsung bisa dipakai.
+
+Kelola seperti service biasa:
+
+```sh
+systemctl status claude-hub claude-web
+journalctl -u claude-hub -f
+```
+
 ## Deploy hub di belakang nginx
 
 Hub bisa ditaruh di belakang nginx seperti aplikasi WebSocket lain. Satu server
@@ -103,8 +151,9 @@ server {
   ssl_certificate     /etc/letsencrypt/live/hub.perusahaan.com/fullchain.pem;
   ssl_certificate_key /etc/letsencrypt/live/hub.perusahaan.com/privkey.pem;
 
-  # UI statis hasil `npm run build --workspace=web` (apps/web/build)
-  root /srv/claude-remote/web;
+  # UI statis hasil build. Kalau memakai install-server.sh, matikan
+  # claude-web.service dan arahkan root ke sini — nginx menggantikannya.
+  root /opt/claude-remote/app/apps/web/build;
   location / { try_files $uri $uri/ /index.html; }   # SPA fallback
 
   # WebSocket — browser (/ws) dan agent (/agent)
@@ -240,7 +289,9 @@ bisa melihat status HTTP dari handshake WS yang ditolak (`onerror` kosong,
 | `packages/protocol` | tipe TS bersama + `applyEv` (perakit delta) |
 | `apps/hub` | relay WS, SQLite, live buffer, coalescing, otorisasi, pairing |
 | `apps/agent` | pembungkus Claude Agent SDK, outbox, registry session lokal, CLI |
-| `apps/web` | SvelteKit SPA, multi-pane |
+| `apps/web` | SvelteKit SPA, multi-pane, + `serve.mjs` statis tanpa dependensi |
+| `install-server.sh` | pasang hub + web sebagai dua service systemd |
+| `install.sh` | pasang binary agent di laptop |
 
 ## Empat keputusan yang menentukan bentuk kode ini
 
@@ -273,6 +324,9 @@ Rinciannya di `docs/PROTOCOL.md` §5.
 - Penjelajahan direktori host, dan session dibuat dari path hasil penjelajahan
 - Auto mode: tool jalan tanpa `approval_req`; dimatikan lagi → minta izin lagi
 - cwd salah → error jelas di transcript, agent tetap hidup
+- Installer server: export direktori kerja, `npm ci`, build dengan `VITE_HUB_URL`
+  tertanam, hub dan web jalan berdampingan, unit systemd lolos
+  `systemd-analyze verify`, dan `BIND` benar-benar membatasi alamat listen
 - Lepas laptop: token mati (401 saat coba sambung lagi), agent membuang config
   dan berhenti, host tanpa session terhapus, host bertranscript jadi arsip,
   dan user lain ditolak hub saat mencoba mencabut host orang

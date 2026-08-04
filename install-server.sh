@@ -160,8 +160,10 @@ step "Memasang dependensi (bisa beberapa menit)"
 (cd "$APP" && "$NPM_BIN" ci --no-audit --no-fund >/dev/null) || die "npm ci gagal"
 
 step "Membangun UI"
-# HUB_URL ditanam saat build; UI tidak bisa menemukannya sendiri saat runtime.
-(cd "$APP" && VITE_HUB_URL="$HUB_URL" "$NPM_BIN" run build --workspace=web >/dev/null) \
+# Sengaja TANPA VITE_HUB_URL: alamat hub ditentukan saat runtime (disuntikkan
+# serve.mjs dari web.env, atau diturunkan dari location kalau same-origin).
+# Kalau ditanam di sini, ganti domain berarti build ulang seluruh UI.
+(cd "$APP" && "$NPM_BIN" run build --workspace=web >/dev/null) \
   || die "build web gagal"
 [ -f "$APP/apps/web/build/index.html" ] || die "hasil build web tidak ditemukan"
 
@@ -196,6 +198,7 @@ cat > "$ETC/web.env" <<EOF
 PORT=$WEB_PORT
 HOST=$BIND
 WEB_ROOT=$APP/apps/web/build
+HUB_URL=$HUB_URL
 EOF
 
 # Berisi lokasi DB dan port, bukan rahasia — tapi tidak ada alasan

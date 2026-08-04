@@ -8,12 +8,24 @@
  * VPS sederhana tanpa reverse proxy.
  */
 import { createServer } from 'node:http'
-import { createReadStream, statSync } from 'node:fs'
+import { createReadStream, readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize, resolve } from 'node:path'
 
 const ROOT = resolve(process.env.WEB_ROOT ?? join(import.meta.dirname, 'build'))
 const PORT = Number(process.env.PORT ?? 8080)
 const HOST = process.env.HOST ?? '0.0.0.0'
+
+/**
+ * Alamat hub disuntikkan ke HTML saat disajikan, bukan ditanam saat build.
+ * Vite mengubah `import.meta.env.*` menjadi literal, jadi kalau alamatnya
+ * datang dari sana satu build terikat mati ke satu domain. Lewat sini cukup
+ * ubah HUB_URL di web.env lalu restart service — UI tidak perlu dibangun ulang.
+ *
+ * Kosongkan kalau UI dan hub same-origin: apps/web/src/lib/hub-url.ts
+ * menurunkannya sendiri dari `location`.
+ */
+const HUB_URL = process.env.HUB_URL ?? ''
+const INJECT = HUB_URL ? `<script>window.__HUB_URL__=${JSON.stringify(HUB_URL)}</script>` : ''
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -66,6 +78,31 @@ const server = createServer((req, res) => {
   } catch {
     res.writeHead(404).end('not found')
     return
+  }
+
+  if (INJECT && ext === '.html') {
+    let html
+    try {
+      html = readFileSync(file, 'utf8')
+    } catch {
+      res.writeHead(404).end('not found')
+      return
+    }
+    if (html.includes('</head>')) {
+      html = html.replace('</head>', `${INJECT}</head>`)
+    } else {
+      // Tidak fatal — hub-url.ts masih punya jalur same-origin — tapi kalau UI
+      // dan hub beda origin, ini persis kondisi yang bikin koneksi gagal.
+      console.warn(`[web] ${file}: </head> tidak ditemukan, HUB_URL tidak disuntikkan`)
+    }
+    const body = Buffer.from(html)
+    res.writeHead(200, {
+      'content-type': TYPES['.html'],
+      'content-length': body.length,
+      'cache-control': 'no-cache',
+      'x-content-type-options': 'nosniff',
+    })
+    return req.method === 'HEAD' ? res.end() : res.end(body)
   }
 
   res.writeHead(200, {

@@ -123,7 +123,7 @@ Yang dilakukan script:
   `/opt/claude-remote/node` — tidak mengotori paket sistem.
 - Mengambil sumber dari checkout (isi direktori kerja, minus yang di-gitignore)
   atau `git clone` kalau dijalankan lewat curl.
-- `npm ci`, lalu build UI dengan `VITE_HUB_URL` yang ditanam.
+- `npm ci`, lalu build UI (alamat hub TIDAK ditanam — ditentukan saat runtime).
 - Membuat user sistem `claude-remote`, DB di `/var/lib/claude-remote`.
 - Menulis unit dengan pengetatan (`ProtectSystem=strict`, `NoNewPrivileges`,
   `ProtectHome`) — service hanya bisa menulis ke direktori state-nya.
@@ -135,9 +135,11 @@ Variabel yang sering dipakai:
 HUB_URL=wss://hub.contoh.com/socket BIND=127.0.0.1 sudo -E sh install-server.sh
 ```
 
-`HUB_URL` **ditanam saat build**, jadi ganti domain berarti jalankan ulang
-script-nya. Sub-path di dalamnya (`/socket`) otomatis menjadi `BASE_PATH` hub.
-`BIND=127.0.0.1` untuk pemasangan di belakang nginx; default `0.0.0.0` supaya
+`HUB_URL` adalah alamat publik hub — bukan alamat listen. Sub-path di
+dalamnya (`/socket`) otomatis menjadi `BASE_PATH` hub, dan alamatnya ditulis ke
+`web.env` untuk disuntikkan saat runtime, jadi ganti domain **tidak** perlu
+build ulang. `BIND` dan `HUB_PORT`/`WEB_PORT` yang mengatur listen lokal:
+`BIND=127.0.0.1` untuk pemasangan di belakang nginx, default `0.0.0.0` supaya
 VPS tanpa proxy langsung bisa dipakai.
 
 Kelola seperti service biasa:
@@ -275,21 +277,27 @@ tertolong: Cloudflare, load balancer cloud, atau proxy korporat di jalur, yang
 punya batas idle sendiri. Perbaikan sebenarnya adalah mem-ping browser juga —
 belum dikerjakan, tercatat di bagian "Belum ada".
 
-### Alamat hub masih ditanam saat build
+### Alamat hub ditentukan saat runtime
 
-```js
-const HUB = import.meta.env.VITE_HUB_URL ?? 'ws://localhost:8787'
-```
+Dulu alamat ini datang dari `import.meta.env.VITE_HUB_URL`. Vite mengganti
+ekspresi itu menjadi literal **saat build**, jadi satu build terikat mati ke
+satu domain: salah isi sekali, atau pindah domain, berarti build ulang seluruh
+UI. Sekarang tidak lagi — `apps/web/src/lib/hub-url.ts` menentukannya saat
+halaman jalan, dengan urutan:
 
-Untuk deployment di atas, build UI-nya dengan:
+1. **`window.__HUB_URL__`** — disuntikkan ke `index.html` oleh `serve.mjs` dari
+   env `HUB_URL`. Ubah `/etc/claude-remote/web.env`, `systemctl restart
+   claude-web`, selesai. Ini yang dipakai pemasangan **tanpa** reverse proxy,
+   di mana UI (`:8080`) dan hub (`:8787`) beda origin.
+2. **`VITE_HUB_URL`** — hanya untuk dev (`npm run web` di `:5173`, hub di
+   `:8787`). Di dev tidak ada "sesudah build", jadi build-time wajar.
+3. **Diturunkan dari `location`** — `wss://<host halaman>/socket`. Deployment
+   di belakang nginx selalu same-origin, jadi satu build statis jalan di domain
+   mana pun tanpa dikonfigurasi sama sekali.
 
-```sh
-VITE_HUB_URL=wss://claude.pinuspintar.com/socket npm run build --workspace=web
-```
-
-Artinya satu build terikat ke satu domain. Karena setup nginx ini selalu
-same-origin, sebenarnya alamat itu bisa diturunkan dari `location` saat runtime
-sehingga satu build statis jalan di domain mana pun — juga belum dikerjakan.
+`install-server.sh` karena itu **tidak** lagi menanam `VITE_HUB_URL` saat
+build; ia menulis `HUB_URL` ke `web.env`. Bundle hasil build tidak lagi
+mengandung alamat hub mana pun.
 
 ## Pemakaian
 
@@ -394,7 +402,7 @@ Rinciannya di `docs/PROTOCOL.md` §5.
 - Penjelajahan direktori host, dan session dibuat dari path hasil penjelajahan
 - Auto mode: tool jalan tanpa `approval_req`; dimatikan lagi → minta izin lagi
 - cwd salah → error jelas di transcript, agent tetap hidup
-- Installer server: export direktori kerja, `npm ci`, build dengan `VITE_HUB_URL`
+- Installer server: export direktori kerja, `npm ci`, build tanpa alamat hub
   tertanam, hub dan web jalan berdampingan, unit systemd lolos
   `systemd-analyze verify`, dan `BIND` benar-benar membatasi alamat listen
 - Lepas laptop: token mati (401 saat coba sambung lagi), agent membuang config
@@ -413,8 +421,6 @@ Rinciannya di `docs/PROTOCOL.md` §5.
 - **Heartbeat ke browser** — hub hanya mem-ping agent, sehingga koneksi browser
   yang idle diputus oleh proxy dengan batas idle pendek. Detail dan dampaknya
   di bagian nginx di atas.
-- **Alamat hub same-origin** — masih ditanam saat build lewat `VITE_HUB_URL`,
-  jadi satu build terikat ke satu domain.
 - **Agent belum bisa diberi alamat hub lewat argumen** — hanya `HUB_URL`.
   Tidak lagi fatal sejak default-nya `wss://claude.pinuspintar.com/socket` (bukan
   `localhost`), tapi yang memasang hub sendiri masih harus tahu env var itu.

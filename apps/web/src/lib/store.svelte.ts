@@ -11,8 +11,7 @@ import {
   type UserMeta,
 } from '@company/protocol'
 
-const HUB = import.meta.env.VITE_HUB_URL ?? 'ws://localhost:8787'
-const HUB_HTTP = HUB.replace(/^ws/, 'http')
+import { HUB, HUB_HTTP } from './hub-url.ts'
 
 /** Batas pane terbuka. Tiap pane satu subscription; lebih dari ini tak terbaca. */
 export const MAX_PANES = 3

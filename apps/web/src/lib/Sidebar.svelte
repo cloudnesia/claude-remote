@@ -80,13 +80,14 @@
     </a>
   </div>
 
-  <header>
-    <span class="dot" style:background={store.connected ? '#3fb950' : '#e5534b'}></span>
-    <strong>Nodes</strong>
-    <button class="pair" onclick={onpair} title="Hubungkan node baru">+ node</button>
-  </header>
+  <div class="sidebar-content">
+    <header>
+      <span class="dot" style:background={store.connected ? '#3fb950' : '#e5534b'}></span>
+      <strong>Nodes</strong>
+      <button class="pair" onclick={onpair} title="Hubungkan node baru">+ node</button>
+    </header>
 
-  {#each store.users as user (user.id)}
+    {#each store.users as user (user.id)}
     {@const allHosts = store.users.flatMap(u => u.hosts)}
     {#each sortedHosts(user.hosts) as host (host.id)}
         <div
@@ -152,9 +153,19 @@
     {/each}
   {/each}
 
-  {#if store.users.every(u => u.hosts.length === 0)}
-    <button class="link" onclick={onpair}>hubungkan node pertama</button>
-  {/if}
+    {#if store.users.every(u => u.hosts.length === 0)}
+      <button class="link" onclick={onpair}>hubungkan node pertama</button>
+    {/if}
+  </div>
+
+  <footer class="sidebar-footer">
+    <button class="logout-btn" onclick={() => store.signOut(null)} title="Keluar dari akun">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 15H3a2 2 0 01-2-2V3a2 2 0 012-2h3M11 11l4-4-4-4M15 7H6"/>
+      </svg>
+      <span>Logout</span>
+    </button>
+  </footer>
 </aside>
 
 <style>
@@ -162,8 +173,15 @@
     width: 250px;
     flex: none;
     border-right: 1px solid #23272f;
-    overflow-y: auto;
     background: #14171c;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .sidebar-content {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
   }
   .branding {
     display: flex;
@@ -412,6 +430,39 @@
     text-align: left;
   }
 
+  .sidebar-footer {
+    flex: none;
+    border-top: 1px solid #23272f;
+    padding: 10px 12px;
+    background: #0f1115;
+  }
+  .logout-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: 1px solid #3a3f4a;
+    border-radius: 6px;
+    color: #9aa3b2;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .logout-btn:hover {
+    background: rgba(229, 83, 75, 0.1);
+    border-color: #e5534b;
+    color: #e5534b;
+  }
+  .logout-btn svg {
+    flex-shrink: 0;
+  }
+  .logout-btn span {
+    flex: 1;
+  }
+
   /* Mobile responsive */
   @media (max-width: 768px) {
     aside {
@@ -456,6 +507,17 @@
     }
     .plus-icon {
       font-size: 18px;
+    }
+    .sidebar-footer {
+      padding: 8px 12px;
+    }
+    .logout-btn {
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+    .logout-btn svg {
+      width: 18px;
+      height: 18px;
     }
   }
 

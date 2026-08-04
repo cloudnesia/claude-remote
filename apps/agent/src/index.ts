@@ -13,7 +13,7 @@ import { isPackaged, resolveClaudeBin } from './claude.ts'
 const VERSION = process.env.AGENT_VERSION ?? 'dev'
 
 const cfg = config.read()
-const HUB = process.env.HUB_URL ?? cfg?.hubUrl ?? 'ws://localhost:8787'
+const HUB = process.env.HUB_URL ?? cfg?.hubUrl ?? config.DEFAULT_HUB_URL
 const HUB_HTTP = HUB.replace(/^ws/, 'http')
 // HOST_TOKEN dari env tetap didukung untuk dev/CI; jalur normalnya pairing.
 const TOKEN = process.env.HOST_TOKEN ?? cfg?.hostToken ?? ''

@@ -30,10 +30,14 @@ npm run web           # terminal 2
 Lalu hubungkan laptop lewat **device-code pairing**, seperti `gh auth login`:
 
 ```bash
-npm run agent -- login    # di laptop yang mau dihubungkan (dari source)
+# HUB_URL/WEB_URL wajib saat dev: default agent menunjuk ke hub publik
+HUB_URL=ws://localhost:8787 WEB_URL=http://localhost:5173 \
+  npm run agent -- login    # di laptop yang mau dihubungkan (dari source)
 #   Buka  http://localhost:5173  lalu masukkan kode ini:
 #       F98M-VUU2
 ```
+
+Lebih enak taruh keduanya di `.env` — `npm run hub|agent` sudah membacanya.
 
 Ketik kode itu di web (tombol **+ laptop**). Agent menerima host token-nya
 sendiri, menyimpannya di `~/.company-agent/config.json` dengan mode `0600`,
@@ -58,6 +62,15 @@ Pengguna lain tidak perlu clone repo ini:
 curl -fsSL https://github.com/cloudnesia/claude-remote/releases/latest/download/install.sh | sh
 company-agent login
 company-agent start
+```
+
+Tanpa konfigurasi apa pun, agent memakai hub publik **`remote.deployaja.id`**
+(`wss://remote.deployaja.id`, web-nya `https://remote.deployaja.id`) — jadi
+`company-agent login` langsung mencetak kode yang bisa dipakai. Untuk hub
+sendiri, timpa saat login; alamatnya ikut tersimpan di config:
+
+```sh
+HUB_URL=wss://hub.contoh.com WEB_URL=https://hub.contoh.com company-agent login
 ```
 
 Binary-nya mandiri (Node ter-embed, ~118 MB) untuk `linux-x64`, `linux-arm64`,
@@ -345,8 +358,8 @@ Rinciannya di `docs/PROTOCOL.md` §5.
   di bagian nginx di atas.
 - **Alamat hub same-origin** — masih ditanam saat build lewat `VITE_HUB_URL`,
   jadi satu build terikat ke satu domain.
-- **Agent belum bisa diberi alamat hub lewat argumen** — hanya `HUB_URL`, yang
-  tidak terlihat dari `install.sh`, sehingga `company-agent login` di laptop
-  orang lain menembak `localhost` dan gagal tanpa petunjuk.
+- **Agent belum bisa diberi alamat hub lewat argumen** — hanya `HUB_URL`.
+  Tidak lagi fatal sejak default-nya `wss://remote.deployaja.id` (bukan
+  `localhost`), tapi yang memasang hub sendiri masih harus tahu env var itu.
 - **Virtualisasi transcript** — akan terasa berat di atas beberapa ribu blok.
 - **Visibility belum bisa diubah dari UI** (default `team`, kolomnya sudah ada).

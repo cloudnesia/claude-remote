@@ -21,7 +21,7 @@ export async function login(hubHttp: string, hubWs: string): Promise<void> {
     expiresInSec: number
   }
 
-  const webUrl = process.env.WEB_URL ?? 'http://localhost:5173'
+  const webUrl = process.env.WEB_URL ?? config.DEFAULT_WEB_URL
   console.log(`\n  Buka  ${webUrl}  lalu masukkan kode ini:\n`)
   console.log(`      ${code}\n`)
   console.log(`  Berlaku ${Math.floor(expiresInSec / 60)} menit. Menunggu…`)

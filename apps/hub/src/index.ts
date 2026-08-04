@@ -29,6 +29,20 @@ const PORT = Number(process.env.PORT ?? 8787)
 const HOST = process.env.HOST ?? '0.0.0.0'
 const HEARTBEAT_MS = 20_000
 
+/**
+ * Prefiks kalau hub dipasang di sub-path, mis. nginx `location /socket`.
+ * nginx meneruskan URI apa adanya, jadi yang sampai ke sini `/socket/ws`,
+ * bukan `/ws` — tanpa dikupas semua rute di bawah meleset dan koneksi WS
+ * langsung diputus. Dikupas di satu tempat supaya rute tetap ditulis absolut.
+ */
+const BASE_PATH = (process.env.BASE_PATH ?? '').replace(/\/+$/, '')
+
+function stripBase(pathname: string): string {
+  if (!BASE_PATH) return pathname
+  if (pathname === BASE_PATH) return '/'
+  return pathname.startsWith(`${BASE_PATH}/`) ? pathname.slice(BASE_PATH.length) : pathname
+}
+
 // -------------------------------------------------------------- connections
 
 type AgentConn = { ws: WebSocket; hostId: string; alive: boolean }
@@ -79,7 +93,9 @@ const server = createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'content-type, authorization')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   if (req.method === 'OPTIONS') return res.writeHead(204).end()
-  if (req.url === '/health') return res.writeHead(200).end('ok')
+
+  const path = stripBase((req.url ?? '/').split('?')[0])
+  if (path === '/health') return res.writeHead(200).end('ok')
 
   const json = (code: number, body: unknown) => {
     res.writeHead(code, { 'content-type': 'application/json' })
@@ -90,7 +106,7 @@ const server = createServer(async (req, res) => {
     // Browser tidak bisa melihat status HTTP dari handshake WS yang ditolak —
     // `onerror` kosong dan `onclose` selalu 1006. Endpoint ini yang membuat
     // web bisa membedakan "token mati" dari "hub sedang mati".
-    if (req.method === 'GET' && req.url === '/me') {
+    if (req.method === 'GET' && path === '/me') {
       const auth = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
       const user = db.userByToken(auth)
       if (!user) return json(401, { ok: false, reason: 'token user tidak valid' })
@@ -98,19 +114,19 @@ const server = createServer(async (req, res) => {
     }
 
     // --- device-code pairing (lihat apps/hub/src/pairing.ts) ---
-    if (req.method === 'POST' && req.url === '/pair/start') {
+    if (req.method === 'POST' && path === '/pair/start') {
       const b = await readJson(req)
       const hostName = String(b.hostName ?? '').slice(0, 64) || 'laptop'
       const platform = String(b.platform ?? '').slice(0, 32)
       return json(200, pairing.start(hostName, platform))
     }
 
-    if (req.method === 'POST' && req.url === '/pair/poll') {
+    if (req.method === 'POST' && path === '/pair/poll') {
       const b = await readJson(req)
       return json(200, pairing.poll(String(b.pollToken ?? '')))
     }
 
-    if (req.method === 'POST' && req.url === '/pair/claim') {
+    if (req.method === 'POST' && path === '/pair/claim') {
       // Klaim WAJIB atas nama user yang sudah login: klaim itu yang mengikat
       // laptop ke sebuah akun, dan pemegang akun itu nanti bisa menjalankan
       // shell di laptop tersebut.
@@ -147,12 +163,13 @@ const wssBrowser = new WebSocketServer({ noServer: true })
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
   const token = url.searchParams.get('token') ?? ''
+  const path = stripBase(url.pathname)
 
-  if (url.pathname === '/agent') {
+  if (path === '/agent') {
     const host = db.hostByToken(token)
     if (!host) return reject(socket, CLOSE.BAD_TOKEN)
     wssAgent.handleUpgrade(req, socket, head, (ws) => onAgent(ws, host))
-  } else if (url.pathname === '/ws') {
+  } else if (path === '/ws') {
     const user = db.userByToken(token)
     if (!user) return reject(socket, CLOSE.BAD_TOKEN)
     wssBrowser.handleUpgrade(req, socket, head, (ws) => onBrowser(ws, user))
@@ -433,5 +450,5 @@ setInterval(() => {
 }, HEARTBEAT_MS).unref()
 
 server.listen(PORT, HOST, () => {
-  console.log(`[hub] listening on ${HOST}:${PORT}  (ws /agent, ws /ws)`)
+  console.log(`[hub] listening on ${HOST}:${PORT}  (ws ${BASE_PATH}/agent, ws ${BASE_PATH}/ws)`)
 })

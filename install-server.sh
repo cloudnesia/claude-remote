@@ -10,6 +10,9 @@
 # Variabel opsional:
 #   HUB_URL=wss://hub.contoh.com   alamat hub yang dipakai browser & agent
 #                                  (default: ws://<IP server>:HUB_PORT)
+#                                  boleh bersub-path: wss://hub.contoh.com/socket
+#   BASE_PATH=/socket              sub-path tempat nginx melayani hub
+#                                  (default: diambil dari path di HUB_URL)
 #   HUB_PORT=8787                  port hub
 #   WEB_PORT=8080                  port UI
 #   BIND=127.0.0.1                 alamat bind; pakai ini kalau ada nginx di depan
@@ -67,6 +70,15 @@ if [ -z "${HUB_URL:-}" ]; then
   say "  Kalau nanti dipasang di belakang nginx dengan domain, ulangi dengan"
   say "  HUB_URL=wss://domainmu — alamat ini ditanam ke dalam build UI."
 fi
+
+# Kalau hub dilayani di sub-path (nginx `location /socket`), hub perlu tahu
+# prefiksnya: nginx meneruskan URI apa adanya, jadi yang sampai ke hub adalah
+# /socket/ws, bukan /ws. Diturunkan dari HUB_URL supaya tidak ada dua sumber
+# kebenaran yang bisa berbeda.
+if [ -z "${BASE_PATH:-}" ]; then
+  BASE_PATH=$(printf '%s' "$HUB_URL" | sed 's#^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]*##; s#/*$##')
+fi
+[ -z "$BASE_PATH" ] || say "  Base path hub: $BASE_PATH"
 
 # --- node ------------------------------------------------------------------
 
@@ -177,6 +189,7 @@ cat > "$ETC/hub.env" <<EOF
 PORT=$HUB_PORT
 HOST=$BIND
 DB_PATH=$STATE/hub.db
+BASE_PATH=$BASE_PATH
 EOF
 
 cat > "$ETC/web.env" <<EOF

@@ -64,10 +64,11 @@ company-agent login
 company-agent start
 ```
 
-Tanpa konfigurasi apa pun, agent memakai hub publik **`remote.deployaja.id`**
-(`wss://remote.deployaja.id`, web-nya `https://remote.deployaja.id`) — jadi
-`company-agent login` langsung mencetak kode yang bisa dipakai. Untuk hub
-sendiri, timpa saat login; alamatnya ikut tersimpan di config:
+Tanpa konfigurasi apa pun, agent memakai hub publik
+**`claude.pinuspintar.com`** (`wss://claude.pinuspintar.com/socket`, web-nya
+`https://claude.pinuspintar.com`) — jadi `company-agent login` langsung
+mencetak kode yang bisa dipakai. Untuk hub sendiri, timpa saat login;
+alamatnya ikut tersimpan di config:
 
 ```sh
 HUB_URL=wss://hub.contoh.com WEB_URL=https://hub.contoh.com company-agent login
@@ -131,12 +132,13 @@ Yang dilakukan script:
 Variabel yang sering dipakai:
 
 ```sh
-HUB_URL=wss://hub.contoh.com BIND=127.0.0.1 sudo -E sh install-server.sh
+HUB_URL=wss://hub.contoh.com/socket BIND=127.0.0.1 sudo -E sh install-server.sh
 ```
 
 `HUB_URL` **ditanam saat build**, jadi ganti domain berarti jalankan ulang
-script-nya. `BIND=127.0.0.1` untuk pemasangan di belakang nginx; default
-`0.0.0.0` supaya VPS tanpa proxy langsung bisa dipakai.
+script-nya. Sub-path di dalamnya (`/socket`) otomatis menjadi `BASE_PATH` hub.
+`BIND=127.0.0.1` untuk pemasangan di belakang nginx; default `0.0.0.0` supaya
+VPS tanpa proxy langsung bisa dipakai.
 
 Kelola seperti service biasa:
 
@@ -148,8 +150,18 @@ journalctl -u claude-hub -f
 ## Deploy hub di belakang nginx
 
 Hub bisa ditaruh di belakang nginx seperti aplikasi WebSocket lain. Satu server
-block menyajikan UI statis sekaligus mem-proxy hub, jadi UI dan API berada di
-origin yang sama dan CORS tidak lagi relevan.
+block menyajikan UI sekaligus mem-proxy hub, jadi UI dan API berada di origin
+yang sama dan CORS tidak lagi relevan.
+
+Hub melayani lima path: `/ws` (browser), `/agent` (agent), lalu `/me`,
+`/pair/*`, `/health`. Semuanya diturunkan dari **satu** base URL di sisi klien,
+jadi cukup satu `location` kalau base URL-nya diberi sub-path.
+
+### Konfigurasi default: hub di sub-path `/socket`
+
+Ini yang dipakai deployment `claude.pinuspintar.com` dan yang menjadi default
+`DEFAULT_HUB_URL`. `location /socket` sudah cukup untuk semua endpoint hub —
+nginx meneruskan URI apa adanya, dan hub mengupas prefiksnya lewat `BASE_PATH`.
 
 ```nginx
 map $http_upgrade $connection_upgrade {
@@ -157,34 +169,88 @@ map $http_upgrade $connection_upgrade {
   ''      close;
 }
 
+upstream claude_backend { server localhost:8080; }   # claude-web.service
+upstream claude_socket  { server localhost:8787; }   # claude-hub.service
+
+server {
+  listen 443 ssl;
+  server_name claude.pinuspintar.com;
+
+  ssl_certificate     /etc/nginx/ssl/claude.pinuspintar.com/cert.pem;
+  ssl_certificate_key /etc/nginx/ssl/claude.pinuspintar.com/key.pem;
+  ssl_protocols       TLSv1.2 TLSv1.3;
+  ssl_ciphers         HIGH:!aNULL:!MD5;
+
+  # Hub: /socket/ws, /socket/agent, /socket/me, /socket/pair/*, /socket/health
+  location /socket {
+    proxy_pass         http://claude_socket;
+    proxy_http_version 1.1;
+    proxy_set_header   Upgrade           $http_upgrade;
+    proxy_set_header   Connection        $connection_upgrade;
+    proxy_set_header   Host              $host;
+    proxy_set_header   X-Real-IP         $remote_addr;
+    proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Proto $scheme;
+
+    proxy_read_timeout 3600s;   # WAJIB — lihat catatan di bawah
+    proxy_send_timeout 3600s;
+    proxy_buffering    off;
+  }
+
+  # UI statis. Blok ini TIDAK boleh mengirim header Upgrade — serve.mjs
+  # penyaji file biasa, dan `Connection: upgrade` yang dipaksakan ke sana
+  # cuma bikin keep-alive kacau tanpa manfaat apa pun.
+  location / {
+    proxy_pass         http://claude_backend;
+    proxy_set_header   Host              $host;
+    proxy_set_header   X-Real-IP         $remote_addr;
+    proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Proto $scheme;
+  }
+}
+```
+
+Pasang dengan sub-path ikut di `HUB_URL` — installer menurunkan `BASE_PATH`
+dari situ dan menulisnya ke `/etc/claude-remote/hub.env`:
+
+```sh
+HUB_URL=wss://claude.pinuspintar.com/socket BIND=127.0.0.1 sudo -E sh install-server.sh
+```
+
+Agent memakai base URL yang sama (sudah jadi default, jadi boleh dikosongkan):
+
+```sh
+HUB_URL=wss://claude.pinuspintar.com/socket company-agent login
+```
+
+Konversi ke HTTP untuk endpoint pairing terjadi otomatis dan benar —
+`wss://` menjadi `https://`, sub-path ikut terbawa.
+
+### Alternatif: hub di root, UI disajikan nginx langsung
+
+Kalau lebih suka tanpa sub-path, `claude-web.service` bisa dimatikan dan nginx
+menyajikan hasil build sendiri. `BASE_PATH` dikosongkan, `HUB_URL` tanpa path.
+
+```nginx
 server {
   listen 443 ssl;
   server_name hub.perusahaan.com;
 
-  ssl_certificate     /etc/letsencrypt/live/hub.perusahaan.com/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/live/hub.perusahaan.com/privkey.pem;
-
-  # UI statis hasil build. Kalau memakai install-server.sh, matikan
-  # claude-web.service dan arahkan root ke sini — nginx menggantikannya.
   root /opt/claude-remote/app/apps/web/build;
   location / { try_files $uri $uri/ /index.html; }   # SPA fallback
 
-  # WebSocket — browser (/ws) dan agent (/agent)
   location ~ ^/(ws|agent)$ {
     proxy_pass http://127.0.0.1:8787;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection $connection_upgrade;
     proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
 
-    proxy_read_timeout 3600s;   # WAJIB — lihat catatan di bawah
+    proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
     proxy_buffering off;
   }
 
-  # HTTP — /me, /pair/*, /health
   location ~ ^/(me|health|pair/.+)$ {
     proxy_pass http://127.0.0.1:8787;
     proxy_set_header Host $host;
@@ -192,15 +258,6 @@ server {
   }
 }
 ```
-
-Agent cukup diarahkan ke domainnya:
-
-```sh
-HUB_URL=wss://hub.perusahaan.com company-agent login
-```
-
-Konversi ke HTTP untuk endpoint pairing terjadi otomatis dan benar —
-`wss://` menjadi `https://`.
 
 ### Kenapa `proxy_read_timeout` wajib dinaikkan
 
@@ -227,7 +284,7 @@ const HUB = import.meta.env.VITE_HUB_URL ?? 'ws://localhost:8787'
 Untuk deployment di atas, build UI-nya dengan:
 
 ```sh
-VITE_HUB_URL=wss://hub.perusahaan.com npm run build --workspace=web
+VITE_HUB_URL=wss://claude.pinuspintar.com/socket npm run build --workspace=web
 ```
 
 Artinya satu build terikat ke satu domain. Karena setup nginx ini selalu
@@ -359,7 +416,7 @@ Rinciannya di `docs/PROTOCOL.md` §5.
 - **Alamat hub same-origin** — masih ditanam saat build lewat `VITE_HUB_URL`,
   jadi satu build terikat ke satu domain.
 - **Agent belum bisa diberi alamat hub lewat argumen** — hanya `HUB_URL`.
-  Tidak lagi fatal sejak default-nya `wss://remote.deployaja.id` (bukan
+  Tidak lagi fatal sejak default-nya `wss://claude.pinuspintar.com/socket` (bukan
   `localhost`), tapi yang memasang hub sendiri masih harus tahu env var itu.
 - **Virtualisasi transcript** — akan terasa berat di atas beberapa ribu blok.
 - **Visibility belum bisa diubah dari UI** (default `team`, kolomnya sudah ada).

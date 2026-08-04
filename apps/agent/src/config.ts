@@ -10,8 +10,8 @@ export type Config = { hubUrl: string; hostId: string; hostToken: string; hostNa
  * bukan localhost, yang selalu gagal di mesin orang lain. Override lewat
  * `HUB_URL` / `WEB_URL` untuk hub sendiri atau saat dev.
  */
-export const DEFAULT_HUB_URL = 'wss://remote.deployaja.id'
-export const DEFAULT_WEB_URL = 'https://remote.deployaja.id'
+export const DEFAULT_HUB_URL = 'wss://claude.pinuspintar.com/socket'
+export const DEFAULT_WEB_URL = 'https://claude.pinuspintar.com'
 
 export const DIR = process.env.AGENT_HOME ?? join(homedir(), '.company-agent')
 const FILE = join(DIR, 'config.json')

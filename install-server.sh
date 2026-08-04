@@ -105,6 +105,13 @@ fi
 NPM_BIN="$(dirname "$NODE_BIN")/npm"
 [ -x "$NPM_BIN" ] || NPM_BIN=$(command -v npm) || die "npm tidak ditemukan"
 
+# npm dan semua shim di node_modules/.bin pakai shebang `#!/usr/bin/env node`,
+# jadi node harus ada di PATH — bukan cuma diketahui lewat $NODE_BIN. Tanpa ini
+# `npm ci` langsung mati dengan "env: 'node': No such file or directory" saat
+# Node dipasang ke $NODE_DIR.
+PATH="$(dirname "$NODE_BIN"):$PATH"
+export PATH
+
 # --- sumber ----------------------------------------------------------------
 
 step "Mengambil sumber"

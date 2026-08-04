@@ -96,8 +96,10 @@
           title={hasDuplicateName(host, allHosts) ? 'Node dengan nama duplikat terdeteksi. Lepas node yang offline untuk menghindari konflik.' : ''}
         >
           <span class="host-name" class:off={!host.online} class:revoked={host.revoked}>
-            {host.revoked ? '⊘' : host.online ? '●' : '○'}
-            {getDisplayName(host, allHosts)}
+            <span class="status-bullet" class:online={host.online && !host.revoked} class:offline={!host.online} class:revoked={host.revoked}>
+              {host.revoked ? '⊘' : host.online ? '●' : '○'}
+            </span>
+            <span class="host-text">{getDisplayName(host, allHosts)}</span>
             {#if host.revoked}<span class="tag">dilepas</span>{/if}
             {#if hasDuplicateName(host, allHosts) && !host.revoked}
               <span class="tag warn" title="Nama duplikat terdeteksi">⚠ duplikat</span>
@@ -279,9 +281,30 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
   .host-name.off {
     color: #4b515c;
+  }
+  .status-bullet {
+    flex-shrink: 0;
+    line-height: 1;
+  }
+  .status-bullet.online {
+    color: #3fb950;
+  }
+  .status-bullet.offline {
+    color: #6b7280;
+  }
+  .status-bullet.revoked {
+    color: #e5534b;
+  }
+  .host-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .hostacts {
     display: flex;

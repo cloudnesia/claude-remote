@@ -8,14 +8,15 @@
 #   sudo sh install-server.sh
 #
 # Variabel opsional:
-#   HUB_URL=wss://hub.contoh.com   alamat hub yang dipakai browser & agent
-#                                  (default: ws://<IP server>:HUB_PORT)
+#   HUB_URL=wss://hub.contoh.com   alamat PUBLIK hub yang dipakai browser & agent
+#                                  (default: wss://claude.pinuspintar.com/socket)
 #                                  boleh bersub-path: wss://hub.contoh.com/socket
 #   BASE_PATH=/socket              sub-path tempat nginx melayani hub
 #                                  (default: diambil dari path di HUB_URL)
-#   HUB_PORT=8787                  port hub
-#   WEB_PORT=8080                  port UI
-#   BIND=127.0.0.1                 alamat bind; pakai ini kalau ada nginx di depan
+#   HUB_PORT=8787                  port listen hub di mesin ini
+#   WEB_PORT=8080                  port listen UI di mesin ini
+#   BIND=0.0.0.0                   alamat listen; default 127.0.0.1 karena
+#                                  default-nya diasumsikan ada nginx di depan
 #   REF=main                       branch/tag yang dipasang
 #   NODE_VERSION=v24.18.0          Node yang diunduh kalau sistem belum punya ≥24
 #   SYSTEMD=0                      siapkan semuanya tapi jangan sentuh systemd
@@ -31,7 +32,9 @@ ETC="${ETC:-/etc/claude-remote}"
 SVC_USER="${SVC_USER:-claude-remote}"
 HUB_PORT="${HUB_PORT:-8787}"
 WEB_PORT="${WEB_PORT:-8080}"
-BIND="${BIND:-0.0.0.0}"
+# Default = deployment publik di belakang nginx, jadi hub dan web hanya
+# mendengarkan di loopback. VPS tanpa reverse proxy: BIND=0.0.0.0.
+BIND="${BIND:-127.0.0.1}"
 NODE_VERSION="${NODE_VERSION:-v24.18.0}"
 SYSTEMD="${SYSTEMD:-1}"
 
@@ -57,19 +60,11 @@ fi
 
 # --- alamat hub ------------------------------------------------------------
 
-detect_ip() {
-  ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}'
-}
-
-if [ -z "${HUB_URL:-}" ]; then
-  ip=$(detect_ip)
-  [ -n "$ip" ] || die "tidak bisa mendeteksi IP server; set HUB_URL secara eksplisit"
-  HUB_URL="ws://$ip:$HUB_PORT"
-  say ""
-  say "  HUB_URL tidak diset, memakai $HUB_URL"
-  say "  Kalau nanti dipasang di belakang nginx dengan domain, ulangi dengan"
-  say "  HUB_URL=wss://domainmu — alamat ini ditanam ke dalam build UI."
-fi
+# Deployment publik. Dipilih sebagai default supaya `sudo sh install-server.sh`
+# tanpa env apa pun menghasilkan pemasangan yang benar untuk deployment ini —
+# bukan IP LAN hasil tebakan, yang diam-diam salah begitu ada domain di depan.
+# Yang memasang hub sendiri menimpanya lewat HUB_URL.
+HUB_URL="${HUB_URL:-wss://claude.pinuspintar.com/socket}"
 
 # Kalau hub dilayani di sub-path (nginx `location /socket`), hub perlu tahu
 # prefiksnya: nginx meneruskan URI apa adanya, jadi yang sampai ke hub adalah
@@ -78,7 +73,20 @@ fi
 if [ -z "${BASE_PATH:-}" ]; then
   BASE_PATH=$(printf '%s' "$HUB_URL" | sed 's#^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]*##; s#/*$##')
 fi
+
+# Alamat web hanya dipakai untuk ringkasan: sama dengan hub tanpa sub-path,
+# skema ws -> http. Port hub yang tertulis eksplisit diganti port web — itu
+# kasus pemasangan tanpa proxy, di mana keduanya beda port di host yang sama.
+if [ -z "${WEB_URL:-}" ]; then
+  WEB_URL=$(printf '%s' "$HUB_URL" \
+    | sed "s#^ws#http#; s#${BASE_PATH}\$##; s#:${HUB_PORT}\$#:${WEB_PORT}#")
+fi
+
+say ""
+say "  Hub   $HUB_URL"
+say "  Web   $WEB_URL"
 [ -z "$BASE_PATH" ] || say "  Base path hub: $BASE_PATH"
+say "  Listen lokal: hub $BIND:$HUB_PORT, web $BIND:$WEB_PORT"
 
 # --- node ------------------------------------------------------------------
 
@@ -293,22 +301,25 @@ done
 
 # --- ringkasan -------------------------------------------------------------
 
-web_host=$([ "$BIND" = "0.0.0.0" ] && detect_ip || echo "$BIND")
-
 say ""
 say "==================================================================="
 say ""
-say "  UI    http://$web_host:$WEB_PORT"
+say "  UI    $WEB_URL"
 say "  Hub   $HUB_URL"
+say ""
+say "  Alamat di atas dilayani reverse proxy-mu. Service ini: http://$BIND:$WEB_PORT"
+if [ "$BIND" = "127.0.0.1" ]; then
+  say "  Tanpa reverse proxy sama sekali: ulangi dengan BIND=0.0.0.0"
+fi
 say ""
 if [ "$fresh" = 1 ]; then
   say "$seed_out"
   say "  Simpan USER_TOKEN di atas — itu satu-satunya cara masuk ke web."
   say ""
 fi
-say "  Hubungkan laptop:"
+say "  Hubungkan laptop (HUB_URL sudah jadi default agent, boleh dilewat):"
 say ""
-say "      HUB_URL=$HUB_URL company-agent login"
+say "      company-agent login"
 say ""
 say "  Kelola:"
 say "      systemctl status claude-hub claude-web"

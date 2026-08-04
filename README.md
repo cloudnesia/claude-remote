@@ -129,18 +129,23 @@ Yang dilakukan script:
   `ProtectHome`) — service hanya bisa menulis ke direktori state-nya.
 - Seed user awal **hanya kalau DB belum ada**, lalu mencetak tokennya.
 
-Variabel yang sering dipakai:
+Tanpa env apa pun, default-nya adalah deployment publik
+`wss://claude.pinuspintar.com/socket` dengan `BIND=127.0.0.1` — sudah benar
+untuk pemasangan di belakang reverse proxy, jadi tidak ada yang perlu diisi.
+Installer **tidak** menyentuh konfigurasi nginx; itu tetap urusanmu.
+
+Untuk hub sendiri:
 
 ```sh
-HUB_URL=wss://hub.contoh.com/socket BIND=127.0.0.1 sudo -E sh install-server.sh
+HUB_URL=wss://hub.contoh.com/socket sudo -E sh install-server.sh    # di belakang proxy
+HUB_URL=ws://10.0.0.5:8787 BIND=0.0.0.0 sudo -E sh install-server.sh  # tanpa proxy
 ```
 
-`HUB_URL` adalah alamat publik hub — bukan alamat listen. Sub-path di
+`HUB_URL` adalah alamat **publik** hub — bukan alamat listen. Sub-path di
 dalamnya (`/socket`) otomatis menjadi `BASE_PATH` hub, dan alamatnya ditulis ke
 `web.env` untuk disuntikkan saat runtime, jadi ganti domain **tidak** perlu
-build ulang. `BIND` dan `HUB_PORT`/`WEB_PORT` yang mengatur listen lokal:
-`BIND=127.0.0.1` untuk pemasangan di belakang nginx, default `0.0.0.0` supaya
-VPS tanpa proxy langsung bisa dipakai.
+build ulang. Yang mengatur listen lokal adalah `BIND` dan
+`HUB_PORT`/`WEB_PORT`; domain dan 443 tidak pernah masuk ke sana.
 
 Kelola seperti service biasa:
 

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { askQuestions } from '@company/protocol'
+  import AskQuestions from './AskQuestions.svelte'
   import { store } from './store.svelte.ts'
   import Transcript from './Transcript.svelte'
 
@@ -7,6 +9,10 @@
   const meta = $derived(store.meta(sessionId))
   const view = $derived(store.view(sessionId))
   const models = $derived(store.modelsFor(sessionId))
+  /** Non-null kalau yang menunggu bukan izin tool, tapi pertanyaan buat owner. */
+  const asking = $derived(
+    view?.pending ? askQuestions(view.pending.name, view.pending.input) : null,
+  )
 
   const statusLabel: Record<string, string> = {
     idle: 'siap',
@@ -50,7 +56,9 @@
           class:warn={meta.status === 'waiting' || meta.status === 'ratelimited'}
           class:err={meta.status === 'error'}
         >
-          {statusLabel[meta.status] ?? meta.status}
+          {asking && meta.status === 'waiting'
+            ? 'menunggu jawaban'
+            : (statusLabel[meta.status] ?? meta.status)}
         </span>
         {#if view?.canPrompt && models.length}
           <select
@@ -93,11 +101,28 @@
       </div>
     </header>
 
-    {#if view?.pending}
+    {#if view?.pending && asking && view.canPrompt}
+      <!-- key: tiap permintaan baru harus mulai dengan pilihan kosong, bukan
+           mewarisi state jawaban pertanyaan sebelumnya. -->
+      {#key view.pending.reqId}
+        <AskQuestions
+          questions={asking}
+          onSubmit={(answers) => store.approve(sessionId, view!.pending!.reqId, 'allow', answers)}
+          onSkip={() => store.approve(sessionId, view!.pending!.reqId, 'deny')}
+        />
+      {/key}
+    {:else if view?.pending}
       <div class="approval">
         <div class="ask">
-          <strong>{view.pending.name}</strong> minta izin jalan
-          <pre>{JSON.stringify(view.pending.input, null, 1).slice(0, 300)}</pre>
+          {#if asking}
+            <!-- Viewer non-owner: pertanyaannya tetap ditampilkan supaya jelas
+                 kenapa session berhenti, tapi hanya owner yang boleh menjawab. -->
+            <strong>Claude bertanya</strong> ke owner
+            <pre>{asking.map((q) => q.question).join('\n')}</pre>
+          {:else}
+            <strong>{view.pending.name}</strong> minta izin jalan
+            <pre>{JSON.stringify(view.pending.input, null, 1).slice(0, 300)}</pre>
+          {/if}
         </div>
         {#if view.canPrompt}
           <div class="acts">

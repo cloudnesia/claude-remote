@@ -1,6 +1,7 @@
 import {
   applyEv,
   emptyMessage,
+  type Answers,
   type BrowseResult,
   type Decision,
   type Frame,
@@ -268,8 +269,14 @@ class Store {
     this.#send({ t: 'interrupt', sessionId })
   }
 
-  approve(sessionId: string, reqId: string, decision: Decision): void {
-    this.#send({ t: 'approve', sessionId, reqId, decision })
+  /** `answers` hanya dipakai kalau yang minta izin adalah AskUserQuestion. */
+  approve(sessionId: string, reqId: string, decision: Decision, answers?: Answers): void {
+    this.#send({ t: 'approve', sessionId, reqId, decision, answers })
+    // Optimistis: agent akan mengirim `approval_done`, tapi menunggu round-trip
+    // membuat form pertanyaan tetap terlihat setelah diklik — seolah tidak
+    // terkirim, dan owner mengirim jawaban dua kali.
+    const v = this.views[sessionId]
+    if (v?.pending?.reqId === reqId) v.pending = null
   }
 
   newSession(hostId: string, cwd: string, title: string): void {

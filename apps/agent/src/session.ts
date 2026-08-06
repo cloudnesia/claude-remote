@@ -1,5 +1,5 @@
 import { query, type Query } from '@anthropic-ai/claude-agent-sdk'
-import type { Decision, Ev, Frame } from '@company/protocol'
+import { ASK_TOOL, type Answers, type Decision, type Ev, type Frame } from '@company/protocol'
 import { Outbox } from './outbox.ts'
 import { checkCwd } from './fs.ts'
 import { claudeSpawnOptions } from './claude.ts'
@@ -8,6 +8,9 @@ import { claudeSpawnOptions } from './claude.ts'
 const IDLE_MS = Number(process.env.IDLE_MS ?? 10 * 60_000)
 
 type Emit = (frame: Frame) => void
+
+/** Balasan owner atas satu `approval_req`. `answers` hanya terisi untuk ASK_TOOL. */
+type Verdict = { decision: Decision; answers?: Answers }
 
 /**
  * Antrian prompt sebagai AsyncIterable. Inilah yang bikin satu proses Claude
@@ -50,7 +53,7 @@ export class SessionRunner {
   readonly outbox: Outbox
   private q: Query | null = null
   private queue = new PromptQueue()
-  private approvals = new Map<string, (d: Decision) => void>()
+  private approvals = new Map<string, (v: Verdict) => void>()
   private idleTimer: NodeJS.Timeout | null = null
 
   claudeSessionId: string | undefined
@@ -135,8 +138,8 @@ export class SessionRunner {
     }
   }
 
-  resolveApproval(reqId: string, decision: Decision): void {
-    this.approvals.get(reqId)?.(decision)
+  resolveApproval(reqId: string, decision: Decision, answers?: Answers): void {
+    this.approvals.get(reqId)?.({ decision, answers })
     this.approvals.delete(reqId)
   }
 
@@ -147,7 +150,7 @@ export class SessionRunner {
     this.queue.close()
     this.queue = new PromptQueue()
     this.q = null
-    for (const resolve of this.approvals.values()) resolve('deny')
+    for (const resolve of this.approvals.values()) resolve({ decision: 'deny' })
     this.approvals.clear()
   }
 
@@ -186,25 +189,42 @@ export class SessionRunner {
         includePartialMessages: true,
         permissionMode: 'default',
         canUseTool: async (name, input) => {
+          // AskUserQuestion bukan soal izin, tapi soal jawaban: "allow" dengan
+          // input apa adanya berarti `answers` kosong, dan Claude menerima
+          // "User has answered your questions:" tanpa isi. Jadi tool ini SELALU
+          // ditanyakan, bahkan saat auto mode — tidak ada jawaban yang bisa
+          // ditebak agent.
+          const asking = name === ASK_TOOL
+
           // Auto mode: langsung izinkan. Tetap terlihat di transcript lewat
           // tool_start/tool_result, jadi tidak ada eksekusi yang tersembunyi —
           // yang hilang hanya kesempatan menolaknya.
-          if (this.auto) return { behavior: 'allow', updatedInput: input }
+          if (this.auto && !asking) return { behavior: 'allow', updatedInput: input }
 
           const reqId = `ap_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
           this.send({ t: 'approval_req', reqId, name, input })
           this.send({ t: 'status', status: 'waiting' })
 
-          const decision = await new Promise<Decision>((resolve) => {
+          const { decision, answers } = await new Promise<Verdict>((resolve) => {
             this.approvals.set(reqId, resolve)
           })
 
           this.send({ t: 'approval_done', reqId, decision })
           this.send({ t: 'status', status: 'thinking' })
 
-          return decision === 'deny'
-            ? { behavior: 'deny', message: 'Ditolak owner lewat web' }
-            : { behavior: 'allow', updatedInput: input }
+          if (decision === 'deny') {
+            return {
+              behavior: 'deny',
+              message: asking ? 'User tidak menjawab pertanyaan' : 'Ditolak owner lewat web',
+            }
+          }
+
+          return {
+            behavior: 'allow',
+            updatedInput: asking
+              ? { ...(input as Record<string, unknown>), answers: answers ?? {} }
+              : input,
+          }
         },
       },
     })

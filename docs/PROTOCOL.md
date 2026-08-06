@@ -69,6 +69,24 @@ type Frame = {
 - `approval_req` membekukan session sampai ada `approval_resp`. UI wajib
   menonjolkannya — kalau tidak, session menggantung tanpa penjelasan.
 
+### `AskUserQuestion`: approval yang butuh isi, bukan cuma izin
+
+Claude Code bertanya balik lewat tool bawaan `AskUserQuestion`, dan tool itu
+lewat jalur `approval_req` yang sama seperti tool lain. Bedanya: mengizinkan
+saja tidak cukup. Jawaban user masuk ke percakapan **hanya** lewat field
+`answers` di dalam input tool — `Record<pertanyaan, jawaban>`, multi-select
+digabung koma. Approve tanpa `answers` membuat Claude menerima "your questions
+have been answered" yang kosong, lalu menebak sendiri.
+
+Karena itu:
+
+- `approve` / `approval_resp` membawa `answers?` opsional; agent menempelkannya
+  ke `updatedInput` sebelum meneruskan izin ke SDK.
+- Tool ini **selalu** ditanyakan ke owner, bahkan saat `auto` menyala. Auto mode
+  artinya "tidak usah minta izin", bukan "jawab sendiri" — tidak ada jawaban
+  yang bisa ditebak agent.
+- Menolaknya sah: Claude menerima "user tidak menjawab" dan lanjut sendiri.
+
 ---
 
 ## 3. Agent ↔ Hub (`WS /agent?token=<hostToken>`)
@@ -87,7 +105,7 @@ bikin sistem jalan dari wifi kafe / di belakang NAT.
 | `browse`         | `reqId`, `path`                         | daftar subdirektori di host |
 | `prompt`         | `sessionId`, `text`                     | suntik prompt (owner sudah divalidasi hub) |
 | `interrupt`      | `sessionId`                             | setara ESC |
-| `approval_resp`  | `sessionId`, `reqId`, `decision`        | `allow` \| `deny` \| `allow_always` |
+| `approval_resp`  | `sessionId`, `reqId`, `decision`, `answers?` | `allow` \| `deny` \| `allow_always`; `answers` khusus `AskUserQuestion` |
 | `close_session`  | `sessionId`                             | matikan proses, session jadi arsip |
 | `ack`            | `sessionId`, `seq`                      | hub sudah tahan lama frame ≤ seq; agent boleh trim buffer |
 
@@ -150,7 +168,7 @@ replay setelah reconnect.
 | `unsubscribe` | `sessionId`                        | |
 | `prompt`      | `sessionId`, `text`                | **owner saja** — divalidasi di hub |
 | `interrupt`   | `sessionId`                        | owner saja |
-| `approve`     | `sessionId`, `reqId`, `decision`   | owner saja |
+| `approve`     | `sessionId`, `reqId`, `decision`, `answers?` | owner saja; `answers` khusus `AskUserQuestion` |
 | `new_session` | `hostId`, `cwd`, `title`           | owner host saja, host wajib online |
 | `set_auto`    | `sessionId`, `auto`                | owner saja |
 | `set_model`   | `sessionId`, `model`               | owner saja |

@@ -169,7 +169,7 @@ function connect(): void {
         break
 
       case 'approval_resp':
-        runners.get(m.sessionId)?.resolveApproval(m.reqId, m.decision)
+        runners.get(m.sessionId)?.resolveApproval(m.reqId, m.decision, m.answers)
         break
 
       case 'close_session': {

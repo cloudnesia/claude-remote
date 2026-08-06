@@ -24,6 +24,54 @@ export type SessionStatus =
 
 export type Decision = 'allow' | 'deny' | 'allow_always'
 
+// ------------------------------------------------------- pertanyaan balik
+
+/**
+ * Tool bawaan Claude Code untuk bertanya balik ke user. Ia lewat jalur
+ * approval yang sama dengan tool lain, tapi "allow" saja tidak cukup: input
+ * yang dikembalikan harus SUDAH berisi `answers`, karena itulah satu-satunya
+ * tempat jawaban user masuk ke percakapan.
+ */
+export const ASK_TOOL = 'AskUserQuestion'
+
+export type AskOption = { label: string; description: string }
+
+export type AskQuestion = {
+  question: string
+  /** Label pendek untuk chip/tab. */
+  header: string
+  options: AskOption[]
+  multiSelect?: boolean
+}
+
+/** `question` → jawaban. Multi-select digabung dengan koma. Bentuk ini milik
+ * Claude Code, bukan pilihan kita — lihat docs/PROTOCOL.md §2. */
+export type Answers = Record<string, string>
+
+/**
+ * Baca input tool sebagai daftar pertanyaan. Mengembalikan null kalau ini
+ * bukan AskUserQuestion atau bentuknya tidak dikenal — UI lalu jatuh ke
+ * tampilan approval biasa alih-alih meledak.
+ */
+export function askQuestions(name: string, input: unknown): AskQuestion[] | null {
+  if (name !== ASK_TOOL) return null
+  const qs = (input as { questions?: unknown } | null)?.questions
+  if (!Array.isArray(qs) || qs.length === 0) return null
+  const out: AskQuestion[] = []
+  for (const q of qs) {
+    if (typeof q?.question !== 'string' || !Array.isArray(q?.options)) return null
+    out.push({
+      question: q.question,
+      header: typeof q.header === 'string' ? q.header : '',
+      options: q.options.filter(
+        (o: unknown): o is AskOption => typeof (o as AskOption)?.label === 'string',
+      ),
+      multiSelect: q.multiSelect === true,
+    })
+  }
+  return out
+}
+
 export type Usage = {
   inputTokens: number
   outputTokens: number
@@ -110,7 +158,8 @@ export type HubToAgent =
   | { t: 'create_session'; sessionId: string; cwd: string; title: string; auto: boolean }
   | { t: 'prompt'; sessionId: string; text: string }
   | { t: 'interrupt'; sessionId: string }
-  | { t: 'approval_resp'; sessionId: string; reqId: string; decision: Decision }
+  /** `answers` hanya untuk `ASK_TOOL`; diabaikan untuk tool lain. */
+  | { t: 'approval_resp'; sessionId: string; reqId: string; decision: Decision; answers?: Answers }
   | { t: 'close_session'; sessionId: string }
   | { t: 'ack'; sessionId: string; seq: number }
 
@@ -134,7 +183,7 @@ export type BrowserToHub =
   | { t: 'unsubscribe'; sessionId: string }
   | { t: 'prompt'; sessionId: string; text: string }
   | { t: 'interrupt'; sessionId: string }
-  | { t: 'approve'; sessionId: string; reqId: string; decision: Decision }
+  | { t: 'approve'; sessionId: string; reqId: string; decision: Decision; answers?: Answers }
   | { t: 'new_session'; hostId: string; cwd: string; title: string }
   /** Lihat isi direktori di host. Owner host saja. `path` kosong = home. */
   | { t: 'browse'; hostId: string; path: string }

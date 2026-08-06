@@ -418,6 +418,7 @@ function onBrowser(ws: WebSocket, user: db.UserRow): void {
           sessionId: s.id,
           reqId: m.reqId,
           decision: m.decision,
+          answers: m.answers,
         })
         break
     }

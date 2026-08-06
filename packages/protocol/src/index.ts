@@ -72,6 +72,60 @@ export function askQuestions(name: string, input: unknown): AskQuestion[] | null
   return out
 }
 
+// ------------------------------------------------------------ sebutan @node
+
+/** `@all` menyasar semua node milik user yang sedang online. */
+export const MENTION_ALL = 'all'
+
+/** Bentuk yang dikenali: `@nama`, atau `@nama:/path/ke/project`. */
+const MENTION_RE = /@([A-Za-z0-9][A-Za-z0-9._-]*)(?::([^\s]+))?/g
+
+export type Mention = {
+  /** Teks utuh yang dicocokkan, termasuk `@`. */
+  raw: string
+  name: string
+  /** Direktori kerja yang diminta, atau null kalau tidak disebut. */
+  cwd: string | null
+  index: number
+}
+
+/**
+ * Nama node dinormalisasi sebelum dibandingkan: hostname asli sering memuat
+ * spasi dan kapital (`Savana ThinkPad`) yang tidak mungkin diketik setelah `@`.
+ */
+export function nodeSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+export function parseMentions(text: string): Mention[] {
+  const out: Mention[] = []
+  for (const m of text.matchAll(MENTION_RE)) {
+    out.push({ raw: m[0], name: m[1]!, cwd: m[2] ?? null, index: m.index ?? 0 })
+  }
+  return out
+}
+
+/**
+ * Buang sebutan yang benar-benar dipakai untuk routing dari teks prompt.
+ * Yang tidak cocok dengan node mana pun sengaja DIBIARKAN — bisa jadi itu
+ * memang bagian dari kalimat (`email @gmail`), bukan alamat node.
+ */
+export function stripMentions(text: string, used: Mention[]): string {
+  if (!used.length) return text.trim()
+  const drop = new Set(used.map((m) => m.index))
+  let out = ''
+  let cursor = 0
+  for (const m of used.filter((x) => drop.has(x.index)).sort((a, b) => a.index - b.index)) {
+    out += text.slice(cursor, m.index)
+    cursor = m.index + m.raw.length
+  }
+  out += text.slice(cursor)
+  return out.replace(/[ \t]{2,}/g, ' ').trim()
+}
+
 export type Usage = {
   inputTokens: number
   outputTokens: number
@@ -185,6 +239,8 @@ export type BrowserToHub =
   | { t: 'interrupt'; sessionId: string }
   | { t: 'approve'; sessionId: string; reqId: string; decision: Decision; answers?: Answers }
   | { t: 'new_session'; hostId: string; cwd: string; title: string }
+  /** Session lintas node. Tidak terikat host mana pun saat dibuat. */
+  | { t: 'new_general'; title: string }
   /** Lihat isi direktori di host. Owner host saja. `path` kosong = home. */
   | { t: 'browse'; hostId: string; path: string }
   /** Auto-approve semua tool di session ini. Owner saja. */
@@ -219,13 +275,42 @@ export type HostMeta = {
   revoked: boolean
   /** Kosong sampai agent selesai mengenumerasi (butuh Claude Code hidup). */
   models: ModelInfo[]
+  /** Session biasa saja. Lane milik general session TIDAK ikut di sini. */
   sessions: SessionMeta[]
+}
+
+/**
+ * Satu node yang ikut dalam sebuah general session. Di balik layar ini adalah
+ * session biasa milik satu host — itulah kenapa `seq`, replay, dan transcript
+ * tetap jalan seperti session lain. Yang baru cuma pengelompokannya.
+ */
+export type LaneMeta = {
+  sessionId: string
+  hostId: string
+  hostName: string
+  cwd: string
+  online: boolean
+  status: SessionStatus
+}
+
+/**
+ * Session yang tidak terikat satu laptop. Prompt-nya dirutekan lewat sebutan
+ * `@node`, dan satu prompt bisa jalan di beberapa node sekaligus.
+ */
+export type GeneralMeta = {
+  id: string
+  title: string
+  ownerId: string
+  updatedAt: number
+  lanes: LaneMeta[]
 }
 
 export type UserMeta = {
   id: string
   name: string
   hosts: HostMeta[]
+  /** Hanya milik user yang meminta roster — general session selalu privat. */
+  generals: GeneralMeta[]
 }
 
 /** Satu blok konten dalam giliran assistant, sudah dirakit dari delta. */
@@ -253,6 +338,13 @@ export type Message = {
 
 export type HubToBrowser =
   | { t: 'roster'; users: UserMeta[]; me: string }
+  /**
+   * Susunan lane sebuah general session. Dikirim saat subscribe dan setiap
+   * kali ada node baru ikut. Isi tiap lane menyusul sebagai `snapshot` biasa
+   * dengan `sessionId` lane — jadi jalur transcript-nya sama persis dengan
+   * session biasa, tidak ada cabang khusus di browser.
+   */
+  | { t: 'general'; sessionId: string; title: string; lanes: LaneMeta[]; canPrompt: boolean }
   | {
       t: 'snapshot'
       sessionId: string

@@ -170,16 +170,21 @@ replay setelah reconnect.
 | `interrupt`   | `sessionId`                        | owner saja |
 | `approve`     | `sessionId`, `reqId`, `decision`, `answers?` | owner saja; `answers` khusus `AskUserQuestion` |
 | `new_session` | `hostId`, `cwd`, `title`           | owner host saja, host wajib online |
+| `new_general` | `title`                            | session lintas node — lihat §11 |
 | `set_auto`    | `sessionId`, `auto`                | owner saja |
 | `set_model`   | `sessionId`, `model`               | owner saja |
 | `browse`      | `hostId`, `path`                   | owner host saja |
+
+`subscribe`, `unsubscribe`, `prompt`, dan `interrupt` menerima id **general
+session** juga; hub yang membedakannya, browser mengirim pesan yang sama.
 
 ### Hub → Browser
 
 | `t`           | field                                       | catatan |
 |---------------|---------------------------------------------|---------|
-| `roster`      | `users[] → hosts[] → sessions[]`            | dikirim saat connect & saat berubah |
+| `roster`      | `users[] → hosts[] → sessions[]` + `generals[]` | dikirim saat connect & saat berubah |
 | `snapshot`    | `sessionId`, `messages`, `live`, `seq`      | balasan `subscribe` |
+| `general`     | `sessionId`, `title`, `lanes[]`, `canPrompt` | susunan lane sebuah general session (§11) |
 | `frame`       | `Frame` (sudah di-coalesce)                 | stream live |
 | `host_status` | `hostId`, `online`                          | |
 | `denied`      | `action`, `reason`                          | |
@@ -318,3 +323,66 @@ reconnect. Tanpa aturan kedua itu, dua agent dengan token yang sama akan
 saling menendang tanpa henti — dan gejalanya menyesatkan: session tampak
 hidup, tapi `seq` dari kedua agent bertabrakan sehingga hub membuang frame
 sebagai duplikat dan session diam total tanpa satu pun error.
+
+---
+
+## 11. General session: satu prompt, banyak node
+
+Session biasa terikat satu laptop. **General session** tidak: node-nya
+ditentukan per prompt lewat sebutan `@nama`, dan satu prompt boleh mendarat di
+beberapa laptop sekaligus.
+
+```
+                    ┌── lane: Laptop A (~)        → agent A
+browser ── prompt ──┼── lane: Laptop B (~)        → agent B
+   "@a @b build"    └── lane: Laptop A (/srv/api) → agent A
+```
+
+### Lane adalah session biasa
+
+Ini keputusan yang menentukan segalanya. Tiap pasangan (node, cwd) di dalam
+sebuah general punya satu **lane**, dan lane adalah row `sessions` biasa dengan
+`general_id` terisi. Konsekuensinya:
+
+- `seq` tetap per-session dan tetap di-assign satu agent — tidak ada dua agent
+  yang menulis ke aliran seq yang sama (§1 tidak dilanggar).
+- Replay setelah reconnect, `ack`, persistensi transcript, `auto`, dan
+  rekonsiliasi `hello` jalan apa adanya tanpa satu baris pun kode khusus.
+- Agent **tidak tahu** general session itu ada. Yang dilihatnya cuma
+  `create_session` dan `prompt` seperti biasa.
+
+Yang baru hanya di hub (routing sebutan → lane) dan di browser (render lane
+bersebelahan). Roster menyembunyikan lane dari daftar session host supaya tidak
+muncul dua kali.
+
+### Aturan sebutan
+
+| bentuk               | arti |
+|----------------------|------|
+| `@nama`              | node yang nama-nya cocok setelah dinormalisasi (`Savana ThinkPad` → `savana-thinkpad`) |
+| `@all`               | semua node milik user yang sedang online |
+| `@nama:/path`        | node itu, tapi di direktori tertentu — lane tersendiri |
+| `@<awalan-hostId>`   | jalan keluar saat dua laptop bernama sama |
+
+- Sebutan **telanjang menempel** ke lane yang terakhir dipakai node itu di
+  general yang sama. Tanpa aturan ini, `@node:/srv/api` cuma berumur satu
+  prompt dan lanjutannya diam-diam pindah ke home — percakapan yang sama
+  tampak kehilangan ingatan. Default saat belum ada lane: `~`, diperluas
+  **di host**, bukan di hub.
+- Satu sebutan boleh cocok ke **beberapa** host. Nama laptop gampang kembar,
+  dan fan-out memang tujuan fitur ini, jadi semuanya dipakai.
+- Sebutan yang tidak cocok ke node mana pun **dibiarkan di teks prompt** —
+  bisa jadi itu memang bagian kalimat (`email @gmail`) — lalu dilaporkan lewat
+  `denied`. Yang cocok dibuang dari teks sebelum dikirim ke agent.
+- Node yang disebut tapi offline dilewati, dan itu **selalu dilaporkan**:
+  prompt yang diam-diam cuma mendarat di sebagian node lebih berbahaya
+  daripada yang gagal terang-terangan.
+
+### Otorisasi
+
+General session selalu privat: hanya owner yang melihatnya di roster, dan
+routing hanya boleh menyasar host milik owner itu. Batasnya sama seperti §5 dan
+alasannya juga sama — tiap lane membakar subscription Claude milik pemilik
+laptop.
+
+`interrupt` ke sebuah general diteruskan ke **semua** lane-nya.

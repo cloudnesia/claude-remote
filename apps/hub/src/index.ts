@@ -12,10 +12,12 @@ import {
 } from '@company/protocol'
 import * as db from './db.ts'
 import * as pairing from './pairing.ts'
+import { route } from './general.ts'
 import {
   ingest,
   lastSeqOf,
   markHostOffline,
+  markHostOnline,
   onAck,
   onStatusChange,
   snapshotOf,
@@ -46,7 +48,13 @@ function stripBase(pathname: string): string {
 // -------------------------------------------------------------- connections
 
 type AgentConn = { ws: WebSocket; hostId: string; alive: boolean }
-type BrowserConn = { ws: WebSocket; userId: string; unsubs: Map<string, () => void> }
+type BrowserConn = {
+  ws: WebSocket
+  userId: string
+  unsubs: Map<string, () => void>
+  /** generalId → (laneSessionId → unsub). Lane bisa bertambah selagi terbuka. */
+  generals: Map<string, Map<string, () => void>>
+}
 
 const agents = new Map<string, AgentConn>() // hostId -> conn
 const browsers = new Set<BrowserConn>()
@@ -84,6 +92,87 @@ function broadcastRoster(): void {
 
 function broadcastHostStatus(hostId: string, online: boolean): void {
   for (const c of browsers) sendBrowser(c, { t: 'host_status', hostId, online })
+}
+
+// ------------------------------------------------------------ session/lane
+
+function sendSnapshot(conn: BrowserConn, s: db.SessionRow): void {
+  const snap = snapshotOf(s.id)
+  sendBrowser(conn, {
+    t: 'snapshot',
+    sessionId: s.id,
+    messages: db.messagesOf(s.id),
+    live: snap.live,
+    seq: snap.seq,
+    canPrompt: db.canWrite(s, conn.userId) && isOnline(s.host_id),
+    auto: !!s.auto,
+    model: s.model,
+    pendingApproval: snap.pendingApproval,
+  })
+}
+
+/**
+ * Kirim isi satu lane lalu ikat streamnya. Urutannya wajib begini — sama
+ * seperti subscribe biasa: frame yang datang di sela-sela punya seq > snapshot,
+ * dan browser membuang apa pun yang <= itu.
+ */
+function attachLane(conn: BrowserConn, generalId: string, lane: db.SessionRow): void {
+  const lanes = conn.generals.get(generalId)
+  if (!lanes || lanes.has(lane.id)) return
+  sendSnapshot(conn, lane)
+  lanes.set(
+    lane.id,
+    subscribe(lane.id, (frame) => sendBrowser(conn, { t: 'frame', frame })),
+  )
+}
+
+function sendGeneral(conn: BrowserConn, g: db.GeneralRow): void {
+  sendBrowser(conn, {
+    t: 'general',
+    sessionId: g.id,
+    title: g.title,
+    lanes: db.lanesMeta(g.id, statusOf, isOnline),
+    canPrompt: g.owner_id === conn.userId,
+  })
+}
+
+/** Node baru ikut: semua yang sedang membuka general ini harus tahu. */
+function announceLane(generalId: string, lane: db.SessionRow): void {
+  const g = db.generalById(generalId)
+  if (!g) return
+  for (const c of browsers) {
+    if (!c.generals.has(generalId)) continue
+    sendGeneral(c, g)
+    attachLane(c, generalId, lane)
+  }
+}
+
+/**
+ * Cari lane untuk (general, host, cwd), bikin kalau belum ada.
+ *
+ * Lane adalah session biasa — itu yang membuat satu prompt lintas node tetap
+ * memakai jalur seq/replay/transcript yang sudah ada, alih-alih menambah jalur
+ * kedua yang harus dijaga sendiri.
+ */
+function ensureLane(g: db.GeneralRow, host: db.HostRow, cwd: string): db.SessionRow | null {
+  const existing = db.laneAt(g.id, host.id, cwd)
+  if (existing) return existing
+
+  const id = randomUUID()
+  db.createSession({
+    id,
+    host_id: host.id,
+    owner_id: g.owner_id,
+    title: `${g.title} @ ${host.name}`,
+    cwd,
+    visibility: 'private',
+    general_id: g.id,
+  })
+  sendAgent(host.id, { t: 'create_session', sessionId: id, cwd, title: g.title, auto: false })
+
+  const lane = db.sessionById(id)
+  if (lane) announceLane(g.id, lane)
+  return lane
 }
 
 // -------------------------------------------------------------------- http
@@ -222,6 +311,9 @@ function onAgent(ws: WebSocket, host: db.HostRow): void {
           resumeFrom,
           sessions: db.specsOfHost(host.id),
         })
+        // Status yang dibekukan saat host putus harus dicairkan DI SINI, kalau
+        // tidak session-nya tetap tampak offline sampai ada prompt berikutnya.
+        markHostOnline(db.sessionIdsOfHost(host.id))
         broadcastHostStatus(host.id, true)
         broadcastRoster()
         break
@@ -271,7 +363,7 @@ function onAgent(ws: WebSocket, host: db.HostRow): void {
 // ----------------------------------------------------------- browser socket
 
 function onBrowser(ws: WebSocket, user: db.UserRow): void {
-  const conn: BrowserConn = { ws, userId: user.id, unsubs: new Map() }
+  const conn: BrowserConn = { ws, userId: user.id, unsubs: new Map(), generals: new Map() }
   browsers.add(conn)
 
   sendBrowser(conn, { t: 'roster', users: db.roster(user.id, statusOf, isOnline), me: user.id })
@@ -352,6 +444,24 @@ function onBrowser(ws: WebSocket, user: db.UserRow): void {
       return
     }
 
+    if (m.t === 'new_general') {
+      const id = randomUUID()
+      db.createGeneral({ id, owner_id: user.id, title: m.title || 'General' })
+      broadcastRoster()
+      return
+    }
+
+    // General session dulu: id-nya hidup di tabel lain, jadi `sessionById` di
+    // bawah akan gagal menemukannya dan pesan-pesannya hilang tanpa jejak.
+    const g = db.generalById(m.sessionId)
+    if (g) {
+      if (g.owner_id !== user.id) {
+        return sendBrowser(conn, { t: 'denied', action: m.t, reason: 'bukan session milikmu' })
+      }
+      handleGeneral(conn, g, m)
+      return
+    }
+
     const s = db.sessionById(m.sessionId)
     if (!s) return
 
@@ -360,18 +470,7 @@ function onBrowser(ws: WebSocket, user: db.UserRow): void {
         return sendBrowser(conn, { t: 'denied', action: m.t, reason: 'session privat' })
       }
       conn.unsubs.get(m.sessionId)?.()
-      const snap = snapshotOf(m.sessionId)
-      sendBrowser(conn, {
-        t: 'snapshot',
-        sessionId: m.sessionId,
-        messages: db.messagesOf(m.sessionId),
-        live: snap.live,
-        seq: snap.seq,
-        canPrompt: db.canWrite(s, user.id) && isOnline(s.host_id),
-        auto: !!s.auto,
-        model: s.model,
-        pendingApproval: snap.pendingApproval,
-      })
+      sendSnapshot(conn, s)
       // Subscribe SETELAH snapshot dikirim: frame yang datang di sela-sela akan
       // punya seq > snap.seq, dan browser membuang apa pun yang <= itu.
       conn.unsubs.set(
@@ -426,6 +525,7 @@ function onBrowser(ws: WebSocket, user: db.UserRow): void {
 
   const bye = () => {
     for (const un of conn.unsubs.values()) un()
+    for (const lanes of conn.generals.values()) for (const un of lanes.values()) un()
     for (const [reqId, p] of browseReqs) {
       if (p.conn !== conn) continue
       clearTimeout(p.timer)
@@ -435,6 +535,74 @@ function onBrowser(ws: WebSocket, user: db.UserRow): void {
   }
   ws.on('close', bye)
   ws.on('error', bye)
+}
+
+// ------------------------------------------------------ general session ops
+
+/**
+ * Pesan browser yang menyasar general session. Bedanya dengan session biasa
+ * cuma satu: tidak ada satu agent pun di ujung sana. Prompt dirutekan lewat
+ * sebutan `@node` dan bisa mendarat di beberapa laptop sekaligus.
+ */
+function handleGeneral(conn: BrowserConn, g: db.GeneralRow, m: BrowserToHub): void {
+  switch (m.t) {
+    case 'subscribe': {
+      // Lepas ikatan lama dulu: subscribe ulang terjadi tiap kali browser
+      // reconnect, dan lane yang terikat dua kali mengirim frame dobel.
+      for (const un of conn.generals.get(g.id)?.values() ?? []) un()
+      conn.generals.set(g.id, new Map())
+      sendGeneral(conn, g)
+      for (const lane of db.lanesOf(g.id)) attachLane(conn, g.id, lane)
+      return
+    }
+
+    case 'unsubscribe': {
+      for (const un of conn.generals.get(g.id)?.values() ?? []) un()
+      conn.generals.delete(g.id)
+      return
+    }
+
+    case 'prompt': {
+      const r = route(m.text, db.hostsOf(g.owner_id), isOnline, (hostId) =>
+        db.lastLaneCwd(g.id, hostId),
+      )
+
+      if (!r.targets.length) {
+        const why = r.offline.length
+          ? `node sedang offline: ${r.offline.join(', ')}`
+          : r.unknown.length
+            ? `node tidak dikenal: ${r.unknown.map((n) => `@${n}`).join(', ')}`
+            : 'sebut dulu node-nya, misalnya @laptop atau @all'
+        return sendBrowser(conn, { t: 'denied', action: 'prompt', reason: why })
+      }
+      if (!r.text) {
+        return sendBrowser(conn, { t: 'denied', action: 'prompt', reason: 'prompt kosong' })
+      }
+
+      for (const { host, cwd } of r.targets) {
+        const lane = ensureLane(g, host, cwd)
+        if (lane) sendAgent(host.id, { t: 'prompt', sessionId: lane.id, text: r.text })
+      }
+      db.touchGeneral(g.id)
+
+      // Yang dilewati tetap dilaporkan: prompt yang diam-diam cuma mendarat di
+      // sebagian node lebih berbahaya daripada yang gagal terang-terangan.
+      const skipped = [
+        ...r.offline.map((n) => `${n} (offline)`),
+        ...r.unknown.map((n) => `@${n} (tidak dikenal)`),
+      ]
+      if (skipped.length) {
+        sendBrowser(conn, { t: 'denied', action: 'prompt', reason: `dilewati: ${skipped.join(', ')}` })
+      }
+      broadcastRoster()
+      return
+    }
+
+    case 'interrupt': {
+      for (const lane of db.lanesOf(g.id)) sendAgent(lane.host_id, { t: 'interrupt', sessionId: lane.id })
+      return
+    }
+  }
 }
 
 // --------------------------------------------------------------- heartbeat

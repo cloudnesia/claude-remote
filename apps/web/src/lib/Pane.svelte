@@ -2,6 +2,7 @@
   import { askQuestions } from '@company/protocol'
   import AskQuestions from './AskQuestions.svelte'
   import { store } from './store.svelte.ts'
+  import ToolCall from './ToolCall.svelte'
   import Transcript from './Transcript.svelte'
 
   let { sessionId, closable }: { sessionId: string; closable: boolean } = $props()
@@ -120,8 +121,19 @@
             <strong>Claude bertanya</strong> ke owner
             <pre>{asking.map((q) => q.question).join('\n')}</pre>
           {:else}
-            <strong>{view.pending.name}</strong> minta izin jalan
-            <pre>{JSON.stringify(view.pending.input, null, 1).slice(0, 300)}</pre>
+            <div class="asktitle">minta izin jalan</div>
+            <!-- Perintahnya ditampilkan sebagaimana nanti muncul di transcript,
+                 bukan sebagai JSON: yang menyetujui harus bisa membacanya. -->
+            <ToolCall
+              block={{
+                kind: 'tool',
+                id: view.pending.reqId,
+                name: view.pending.name,
+                input: view.pending.input,
+                done: true,
+              }}
+              compact
+            />
           {/if}
         </div>
         {#if view.canPrompt}
@@ -290,9 +302,8 @@
   }
   .approval {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
+    flex-direction: column;
+    gap: 10px;
     margin: 10px 16px 0;
     padding: 10px 12px;
     background: #2a2313;
@@ -302,6 +313,13 @@
   }
   .ask {
     min-width: 0;
+  }
+  .asktitle {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #c9a86a;
+    margin-bottom: 7px;
   }
   .approval pre {
     margin: 5px 0 0;
@@ -316,6 +334,7 @@
     display: flex;
     gap: 6px;
     flex: none;
+    justify-content: flex-end;
   }
   .acts button {
     border-radius: 5px;

@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { Message, SessionMeta, UserMeta, Visibility } from '@company/protocol'
+import type { GeneralMeta, LaneMeta, Message, SessionMeta, UserMeta, Visibility } from '@company/protocol'
 
 const DB_PATH = process.env.DB_PATH ?? './data/hub.db'
 
@@ -60,6 +60,18 @@ db.exec(`
     PRIMARY KEY (session_id, seq)
   );
 
+  -- General session: wadah lintas node. Sengaja tabel terpisah, bukan sessions
+  -- dengan host_id NULL — kolom itu NOT NULL sejak awal dan SQLite tidak bisa
+  -- melonggarkannya lewat ALTER. Isinya tetap session biasa (lihat kolom
+  -- sessions.general_id), jadi seq/replay/transcript tidak berubah sama sekali.
+  CREATE TABLE IF NOT EXISTS generals (
+    id         TEXT PRIMARY KEY,
+    owner_id   TEXT NOT NULL REFERENCES users(id),
+    title      TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner_id);
   CREATE INDEX IF NOT EXISTS idx_sessions_host  ON sessions(host_id);
 `)
@@ -81,6 +93,9 @@ addColumn('sessions', 'auto', 'INTEGER NOT NULL DEFAULT 0')
 addColumn('sessions', 'model', 'TEXT')
 addColumn('hosts', 'models', "TEXT NOT NULL DEFAULT '[]'")
 addColumn('hosts', 'revoked', 'INTEGER NOT NULL DEFAULT 0')
+// NULL = session biasa. Terisi = lane milik sebuah general session.
+addColumn('sessions', 'general_id', 'TEXT')
+db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_general ON sessions(general_id)')
 
 // ------------------------------------------------------------------ queries
 
@@ -91,7 +106,23 @@ const q = {
   hostById: db.prepare('SELECT * FROM hosts WHERE id = ?'),
   allUsers: db.prepare('SELECT * FROM users ORDER BY name'),
   hostsOf: db.prepare('SELECT * FROM hosts WHERE owner_id = ? ORDER BY name'),
-  sessionsOf: db.prepare('SELECT * FROM sessions WHERE host_id = ? ORDER BY updated_at DESC'),
+  // Lane tidak ikut: tempatnya di bawah general session, bukan di bawah host.
+  sessionsOf: db.prepare(
+    'SELECT * FROM sessions WHERE host_id = ? AND general_id IS NULL ORDER BY updated_at DESC',
+  ),
+  generalsOf: db.prepare('SELECT * FROM generals WHERE owner_id = ? ORDER BY updated_at DESC'),
+  generalById: db.prepare('SELECT * FROM generals WHERE id = ?'),
+  insertGeneral: db.prepare(
+    'INSERT INTO generals (id, owner_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+  ),
+  touchGeneral: db.prepare('UPDATE generals SET updated_at = ? WHERE id = ?'),
+  lanesOf: db.prepare('SELECT * FROM sessions WHERE general_id = ? ORDER BY created_at'),
+  laneAt: db.prepare(
+    'SELECT * FROM sessions WHERE general_id = ? AND host_id = ? AND cwd = ?',
+  ),
+  lastLane: db.prepare(
+    'SELECT cwd FROM sessions WHERE general_id = ? AND host_id = ? ORDER BY updated_at DESC LIMIT 1',
+  ),
   sessionById: db.prepare('SELECT * FROM sessions WHERE id = ?'),
   sessionsOfHost: db.prepare('SELECT id, acked_seq FROM sessions WHERE host_id = ?'),
   specsOfHost: db.prepare('SELECT id, cwd, title, auto, model FROM sessions WHERE host_id = ?'),
@@ -99,8 +130,9 @@ const q = {
   setModel: db.prepare('UPDATE sessions SET model = ? WHERE id = ?'),
   setHostModels: db.prepare('UPDATE hosts SET models = ? WHERE id = ?'),
   insertSession: db.prepare(`
-    INSERT INTO sessions (id, host_id, owner_id, title, cwd, visibility, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+    INSERT INTO sessions
+      (id, host_id, owner_id, title, cwd, visibility, general_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   touchSession: db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?'),
   setClaudeSid: db.prepare('UPDATE sessions SET claude_session_id = ? WHERE id = ?'),
   setAcked: db.prepare('UPDATE sessions SET acked_seq = ? WHERE id = ? AND acked_seq < ?'),
@@ -133,6 +165,16 @@ export type SessionRow = {
   acked_seq: number
   auto: number
   model: string | null
+  /** Null untuk session biasa; terisi kalau ini lane sebuah general session. */
+  general_id: string | null
+  created_at: number
+  updated_at: number
+}
+
+export type GeneralRow = {
+  id: string
+  owner_id: string
+  title: string
   created_at: number
   updated_at: number
 }
@@ -141,6 +183,7 @@ export const userByToken = (t: string) => (q.userByToken.get(t) as UserRow) ?? n
 export const hostByToken = (t: string) => (q.hostByToken.get(t) as HostRow) ?? null
 export const hostById = (id: string) => (q.hostById.get(id) as HostRow) ?? null
 export const sessionById = (id: string) => (q.sessionById.get(id) as SessionRow) ?? null
+export const hostsOf = (ownerId: string) => q.hostsOf.all(ownerId) as HostRow[]
 
 export function createHost(h: Omit<HostRow, 'last_seen' | 'models'>): void {
   db.prepare(
@@ -222,12 +265,45 @@ export function markHostSeen(hostId: string, name: string, platform: string): vo
 export function createSession(
   s: Omit<
     SessionRow,
-    'claude_session_id' | 'acked_seq' | 'auto' | 'model' | 'created_at' | 'updated_at'
-  >,
+    'claude_session_id' | 'acked_seq' | 'auto' | 'model' | 'created_at' | 'updated_at' | 'general_id'
+  > & { general_id?: string | null },
 ): void {
   const now = Date.now()
-  q.insertSession.run(s.id, s.host_id, s.owner_id, s.title, s.cwd, s.visibility, now, now)
+  q.insertSession.run(
+    s.id,
+    s.host_id,
+    s.owner_id,
+    s.title,
+    s.cwd,
+    s.visibility,
+    s.general_id ?? null,
+    now,
+    now,
+  )
 }
+
+// ------------------------------------------------------------------ general
+
+export const generalById = (id: string) => (q.generalById.get(id) as GeneralRow) ?? null
+
+export function createGeneral(g: Omit<GeneralRow, 'created_at' | 'updated_at'>): void {
+  const now = Date.now()
+  q.insertGeneral.run(g.id, g.owner_id, g.title, now, now)
+}
+
+export function touchGeneral(id: string): void {
+  q.touchGeneral.run(Date.now(), id)
+}
+
+export const lanesOf = (generalId: string) => q.lanesOf.all(generalId) as SessionRow[]
+
+/** Lane dikunci per (host, cwd): node yang sama di direktori lain = lane lain. */
+export const laneAt = (generalId: string, hostId: string, cwd: string) =>
+  (q.laneAt.get(generalId, hostId, cwd) as SessionRow) ?? null
+
+/** Direktori lane yang paling belakangan dipakai node ini. Null kalau belum ada. */
+export const lastLaneCwd = (generalId: string, hostId: string): string | null =>
+  (q.lastLane.get(generalId, hostId) as { cwd: string } | undefined)?.cwd ?? null
 
 export function setClaudeSessionId(sessionId: string, claudeSid: string): void {
   q.setClaudeSid.run(claudeSid, sessionId)
@@ -259,6 +335,30 @@ export function messagesOf(sessionId: string): Message[] {
 }
 
 /**
+ * Susunan lane sebuah general session, lengkap dengan status hidupnya. Dipakai
+ * roster (buat sidebar) dan pesan `general` (buat pane) — satu sumber supaya
+ * keduanya tidak pernah beda.
+ */
+export function lanesMeta(
+  generalId: string,
+  liveStatus: (sessionId: string) => SessionMeta['status'],
+  isOnline: (hostId: string) => boolean,
+): LaneMeta[] {
+  return lanesOf(generalId).map((l) => {
+    const h = hostById(l.host_id)
+    const online = isOnline(l.host_id)
+    return {
+      sessionId: l.id,
+      hostId: l.host_id,
+      hostName: h?.name ?? 'node',
+      cwd: l.cwd,
+      online,
+      status: online ? liveStatus(l.id) : ('offline' as const),
+    }
+  })
+}
+
+/**
  * Roster lengkap: User → Host → Session. `visibleTo` menyaring session privat
  * milik orang lain — penyaringan terjadi di sini, bukan di UI.
  */
@@ -271,6 +371,20 @@ export function roster(
   return users.map((u) => ({
     id: u.id,
     name: u.name,
+    // General session tidak punya visibility per-session seperti session biasa,
+    // jadi ia tidak pernah bocor ke roster orang lain sama sekali.
+    generals:
+      u.id === visibleTo
+        ? (q.generalsOf.all(u.id) as GeneralRow[]).map(
+            (g): GeneralMeta => ({
+              id: g.id,
+              title: g.title,
+              ownerId: g.owner_id,
+              updatedAt: g.updated_at,
+              lanes: lanesMeta(g.id, liveStatus, isOnline),
+            }),
+          )
+        : [],
     hosts: (q.hostsOf.all(u.id) as HostRow[]).map((h) => ({
       id: h.id,
       name: h.name,

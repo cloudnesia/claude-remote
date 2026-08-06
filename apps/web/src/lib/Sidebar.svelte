@@ -1,6 +1,6 @@
 <script lang="ts">
   import { store, MAX_PANES } from './store.svelte.ts'
-  import type { HostMeta } from '@company/protocol'
+  import type { GeneralMeta, HostMeta } from '@company/protocol'
 
   let {
     onpair,
@@ -51,6 +51,19 @@
     return allHosts.filter(h => h.name === host.name).length > 1
   }
 
+  /**
+   * Status satu general = status lane yang paling menuntut perhatian. Yang
+   * menunggu izin harus menang: itu satu-satunya keadaan yang macet sampai
+   * ada yang mengklik.
+   */
+  function generalStatus(g: GeneralMeta): string {
+    const s = g.lanes.map((l) => l.status)
+    for (const want of ['waiting', 'error', 'thinking', 'ratelimited', 'idle']) {
+      if (s.includes(want as (typeof s)[number])) return want
+    }
+    return 'offline'
+  }
+
   // Sortir hosts: online dulu, kemudian by name
   function sortedHosts(hosts: any[]) {
     return [...hosts].sort((a, b) => {
@@ -83,6 +96,37 @@
   <div class="sidebar-content">
     <header>
       <span class="dot" style:background={store.connected ? '#3fb950' : '#e5534b'}></span>
+      <strong>General</strong>
+      <button
+        class="pair"
+        onclick={() => store.newGeneral(`General ${store.myGenerals.length + 1}`)}
+        title="Session lintas node — sebut @node di prompt"
+      >
+        + general
+      </button>
+    </header>
+
+    {#each store.myGenerals as g (g.id)}
+      {@const isOpen = store.open.includes(g.id)}
+      {@const st = generalStatus(g)}
+      <div class="row" class:active={isOpen}>
+        <button class="session general" onclick={() => store.focus(g.id)}>
+          <span class="dot" style:background={dot[st]}></span>
+          <span class="title">{g.title}</span>
+          {#if st === 'waiting'}<span class="badge">izin</span>{/if}
+          <span class="count">{g.lanes.length || ''}</span>
+        </button>
+        {#if !isOpen && store.open.length < MAX_PANES && store.open.length > 0}
+          <button class="pin" onclick={() => store.addPane(g.id)} title="Buka di pane sebelah">
+            ⊞
+          </button>
+        {/if}
+      </div>
+    {:else}
+      <div class="empty">satu prompt untuk banyak node</div>
+    {/each}
+
+    <header class="second">
       <strong>Nodes</strong>
       <button class="pair" onclick={onpair} title="Hubungkan node baru">+ node</button>
     </header>
@@ -236,6 +280,22 @@
     gap: 8px;
     padding: 13px 12px 11px;
     border-bottom: 1px solid #23272f;
+  }
+  header.second {
+    border-top: 1px solid #23272f;
+    margin-top: 6px;
+  }
+  .session.general .title {
+    color: #d7cdf5;
+  }
+  .count {
+    margin-left: auto;
+    font-size: 10px;
+    color: #6b7280;
+    background: #1f242c;
+    border-radius: 3px;
+    padding: 0 5px;
+    flex: none;
   }
   .dot {
     width: 9px;

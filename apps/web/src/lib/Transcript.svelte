@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { Block, Message } from '@company/protocol'
+  import type { Message } from '@company/protocol'
+  import ToolCall from './ToolCall.svelte'
 
   let { messages, live }: { messages: Message[]; live: Message | null } = $props()
 
@@ -47,11 +48,6 @@
     }
   }
 
-  const preview = (b: Block & { kind: 'tool' }) =>
-    typeof b.input === 'string' ? b.input : JSON.stringify(b.input)
-
-  const resultText = (c: unknown) =>
-    typeof c === 'string' ? c : Array.isArray(c) ? c.map((x: any) => x?.text ?? '').join('\n') : JSON.stringify(c)
 </script>
 
 <div class="wrapper">
@@ -68,19 +64,7 @@
           {:else if b.kind === 'error'}
             <p class="errblock">{b.text}</p>
           {:else if b.kind === 'tool'}
-            <div class="tool" class:running={!b.result}>
-              <div class="tool-head">
-                <span class="tool-name">{b.name}</span>
-                {#if !b.done}<span class="hint">menyusun…</span>
-                {:else if !b.result}<span class="hint">berjalan…</span>{/if}
-              </div>
-              <!-- Saat masih streaming, input sengaja ditampilkan mentah:
-                   isinya JSON parsial yang belum bisa di-parse. -->
-              <pre class="tool-input">{preview(b)}</pre>
-              {#if b.result}
-                <pre class="tool-result" class:err={!b.result.ok}>{resultText(b.result.content).slice(0, 2000)}</pre>
-              {/if}
-            </div>
+            <ToolCall block={b} />
           {/if}
         {/each}
         {#if m === live && m.blocks.length === 0}
@@ -159,52 +143,6 @@
     font-size: 13px;
     white-space: pre-wrap;
     word-break: break-word;
-  }
-  .tool {
-    border: 1px solid #23272f;
-    border-radius: 6px;
-    margin-bottom: 10px;
-    overflow: hidden;
-  }
-  .tool.running {
-    border-color: #2f4a6b;
-  }
-  .tool-head {
-    display: flex;
-    gap: 8px;
-    align-items: baseline;
-    padding: 6px 10px;
-    background: #1b1f26;
-  }
-  .tool-name {
-    font-size: 12px;
-    font-weight: 600;
-    color: #4a9eff;
-  }
-  .hint {
-    font-size: 11px;
-    color: #6b7280;
-  }
-  pre {
-    margin: 0;
-    padding: 8px 10px;
-    font-size: 12px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
-    overflow-x: auto;
-  }
-  .tool-input {
-    color: #9aa3b2;
-  }
-  .tool-result {
-    border-top: 1px solid #23272f;
-    color: #7d8798;
-    max-height: 220px;
-    overflow-y: auto;
-  }
-  .tool-result.err {
-    color: #e5534b;
   }
   .scroll-down {
     position: absolute;

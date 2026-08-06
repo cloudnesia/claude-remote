@@ -317,6 +317,65 @@ tidak tahu apa-apa soal filesystem laptop itu. Hanya owner host yang boleh
 menjelajah, dan hanya direktori yang ditampilkan (dotdir dan `node_modules`
 disembunyikan).
 
+### Membaca transcript
+
+Tool call ditampilkan menurut jenisnya, bukan sebagai JSON mentah:
+
+| tool | yang terlihat |
+|------|---------------|
+| `Bash` | perintahnya dengan prompt `$`, keterangan model di sebelah nama |
+| `Write` | path (home dipersingkat jadi `~`) + isi berkas bernomor baris |
+| `Edit` | diff merah/hijau: yang lama di atas, yang baru di bawah |
+| `Read`, `Grep`, `Glob` | path atau pola beserta rentang barisnya |
+| `TodoWrite` | daftar centang, langkah yang sedang jalan ditebalkan |
+| lainnya | JSON ter-indent, bukan satu baris panjang |
+
+Isi yang panjang dilipat di 16 baris (hasil di 12) dengan tombol untuk
+membentangkannya, dan tombol ⧉ menyalin perintah atau isi berkasnya — bukan
+pembungkus JSON-nya. Input yang **masih di-stream** tetap ditampilkan mentah:
+pada saat itu isinya JSON parsial yang memang belum bisa di-parse.
+
+Panel approval memakai tampilan yang sama. Menyetujui perintah yang terbaca
+sebagai `{"command":"cd ~/bot && pm2 start ...","description":"..."}` bukan
+persetujuan yang berarti.
+
+### General session: satu prompt, banyak node
+
+Klik **+ general** di sidebar. Session ini tidak terikat satu laptop — node-nya
+disebut di dalam prompt:
+
+```
+@laptop-kerja @vps  jalankan test suite lalu laporkan yang gagal
+@all                git status
+@vps:/srv/api       tail 100 baris terakhir log
+```
+
+Ketik `@` di composer untuk memilih node dari daftar. Tiap node yang disebut
+mendapat kolomnya sendiri di pane: transcript, izin tool, dan tombol auto
+terpisah — karena memang percakapan yang berbeda di mesin yang berbeda.
+
+| bentuk        | arti |
+|---------------|------|
+| `@nama`       | satu node (nama laptop, spasi/kapital jadi `-`) |
+| `@all`        | semua node yang online |
+| `@nama:/path` | node itu di direktori tertentu; kolom tersendiri |
+
+Beberapa hal yang perlu diketahui:
+
+- Sebutan tanpa path **menempel** ke direktori yang terakhir dipakai node itu
+  di session ini. Sebut `@vps:/srv/api` sekali, lanjutannya cukup `@vps`.
+  Default sebelum itu adalah home directory laptopnya.
+- Node yang disebut tapi sedang offline dilewati, dan selalu dilaporkan lewat
+  notifikasi — prompt tidak pernah diam-diam mendarat cuma di sebagian node.
+- Sebutan yang bukan nama node dibiarkan apa adanya di dalam prompt, jadi
+  menulis `email @gmail` tidak akan disalahartikan sebagai alamat node.
+- Tombol ■ di header menghentikan **semua** node sekaligus.
+
+Di balik layar tiap kolom adalah session biasa milik laptop itu, jadi replay
+setelah reconnect, transcript tersimpan, dan auto mode jalan persis sama.
+Agent bahkan tidak tahu general session itu ada. Rinciannya di
+`docs/PROTOCOL.md` §11.
+
 ### Melepas laptop
 
 Arahkan kursor ke nama host di sidebar, klik **lepas**, lalu klik sekali lagi
@@ -415,6 +474,19 @@ Rinciannya di `docs/PROTOCOL.md` §5.
   dan user lain ditolak hub saat mencoba mencabut host orang
 - Ganti model: enumerasi dari host, berpindah saat proses hidup, dan
   diverifikasi lewat session bersih di kedua arah (haiku ↔ opus)
+- Status session **cair lagi** saat host kembali online. Sebelumnya status
+  `offline` di memori hub hanya berubah kalau agent kebetulan mengirim `status`
+  berikutnya — dan itu cuma terjadi saat ada prompt, sehingga session yang
+  laptopnya sudah kembali tetap tampak offline dengan composer terkunci
+- Render tool call per jenis (Bash/Write/Edit/Read/TodoWrite), termasuk di
+  panel approval, dengan input streaming tetap ditampilkan mentah
+- General session, diuji dengan **dua agent tiruan** (bukan Claude Code
+  sungguhan) yang bicara protokol yang sama: satu prompt mendarat di dua node,
+  `@all`, sebutan telanjang menempel ke lane terakhir, `@node:/path` membuka
+  lane baru saat itu juga tanpa reload, node offline dan sebutan tak dikenal
+  dilaporkan, lane pulih dari DB setelah hub restart lengkap dengan
+  transcript-nya, agent merekonsiliasi lane-nya lewat `hello`, dan subscribe
+  dua kali (jalur reconnect browser) tidak menggandakan frame
 
 ## Belum ada
 
@@ -423,6 +495,8 @@ Rinciannya di `docs/PROTOCOL.md` §5.
 - **Eviction idle** sudah ditulis (`IDLE_MS`, default 10 menit) tapi belum
   diuji di bawah kondisi idle sungguhan.
 - **Hapus session** — `close_session` ada di protokol tapi belum ada tombolnya.
+  Berlaku juga untuk general session: judulnya ikut belum bisa diganti, dan
+  lane yang sudah dibuat belum bisa dilepas satu-satu.
 - **Heartbeat ke browser** — hub hanya mem-ping agent, sehingga koneksi browser
   yang idle diputus oleh proxy dengan batas idle pendek. Detail dan dampaknya
   di bagian nginx di atas.

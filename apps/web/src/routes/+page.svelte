@@ -2,6 +2,7 @@
   import { store } from '$lib/store.svelte.ts'
   import Sidebar from '$lib/Sidebar.svelte'
   import Pane from '$lib/Pane.svelte'
+  import GeneralPane from '$lib/GeneralPane.svelte'
   import PairDialog from '$lib/PairDialog.svelte'
   import NewSessionDialog from '$lib/NewSessionDialog.svelte'
   import type { HostMeta } from '@company/protocol'
@@ -67,7 +68,11 @@
         </div>
       {:else}
         {#each store.open as id (id)}
-          <Pane sessionId={id} closable={store.open.length > 1} />
+          {#if store.isGeneral(id)}
+            <GeneralPane sessionId={id} closable={store.open.length > 1} />
+          {:else}
+            <Pane sessionId={id} closable={store.open.length > 1} />
+          {/if}
         {/each}
       {/if}
     </main>

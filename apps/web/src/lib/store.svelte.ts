@@ -5,7 +5,9 @@ import {
   type BrowseResult,
   type Decision,
   type Frame,
+  type GeneralMeta,
   type HubToBrowser,
+  type LaneMeta,
   type Message,
   type ModelInfo,
   type SessionMeta,
@@ -29,6 +31,19 @@ export type SessionView = {
   draft: string
 }
 
+/**
+ * General session di sisi browser cuma daftar lane + draft. Isi tiap lane
+ * tetap `SessionView` biasa di `views` — jadi jalur frame, dedup seq, dan
+ * render transcript persis sama dengan session biasa.
+ */
+export type GeneralView = {
+  title: string
+  lanes: LaneMeta[]
+  canPrompt: boolean
+  loaded: boolean
+  draft: string
+}
+
 class Store {
   users = $state<UserMeta[]>([])
   me = $state('')
@@ -36,6 +51,7 @@ class Store {
   /** Session yang sedang terbuka, kiri ke kanan. */
   open = $state<string[]>([])
   views = $state<Record<string, SessionView>>({})
+  generalViews = $state<Record<string, GeneralView>>({})
   notice = $state<string | null>(null)
   /** Diisi kalau hub menolak token; halaman kembali ke layar masuk. */
   authError = $state<string | null>(null)
@@ -46,6 +62,8 @@ class Store {
   #ws: WebSocket | null = null
   #token = ''
   #backoff = 500
+  /** Judul general yang baru diminta, menunggu id-nya muncul di roster. */
+  #wantGeneral: string | null = null
 
   meta(sessionId: string): SessionMeta | null {
     for (const u of this.users) {
@@ -59,6 +77,32 @@ class Store {
 
   view(sessionId: string): SessionView | null {
     return this.views[sessionId] ?? null
+  }
+
+  /** General session milikku, dari roster. Null kalau id ini session biasa. */
+  generalMeta(id: string): GeneralMeta | null {
+    for (const u of this.users) {
+      const g = u.generals?.find((x) => x.id === id)
+      if (g) return g
+    }
+    return null
+  }
+
+  isGeneral(id: string): boolean {
+    return !!this.generalViews[id] || !!this.generalMeta(id)
+  }
+
+  generalView(id: string): GeneralView | null {
+    return this.generalViews[id] ?? null
+  }
+
+  /** Semua node milikku — bahan untuk pelengkap `@` di composer. */
+  get myHosts() {
+    return this.users.find((u) => u.id === this.me)?.hosts.filter((h) => !h.revoked) ?? []
+  }
+
+  get myGenerals(): GeneralMeta[] {
+    return this.users.find((u) => u.id === this.me)?.generals ?? []
   }
 
   async connect(token: string): Promise<void> {
@@ -129,10 +173,18 @@ class Store {
 
   #handle(m: HubToBrowser): void {
     switch (m.t) {
-      case 'roster':
+      case 'roster': {
         this.users = m.users
         this.me = m.me
+        if (this.#wantGeneral) {
+          const fresh = this.myGenerals.find((g) => g.title === this.#wantGeneral)
+          if (fresh) {
+            this.#wantGeneral = null
+            this.focus(fresh.id)
+          }
+        }
         break
+      }
 
       case 'snapshot': {
         const draft = this.views[m.sessionId]?.draft ?? ''
@@ -149,6 +201,21 @@ class Store {
           loaded: true,
           draft,
         }
+        break
+      }
+
+      case 'general': {
+        const prev = this.generalViews[m.sessionId]
+        this.generalViews[m.sessionId] = {
+          title: m.title,
+          lanes: m.lanes,
+          canPrompt: m.canPrompt,
+          loaded: true,
+          draft: prev?.draft ?? '',
+        }
+        // Lane baru bisa muncul kapan saja (node disebut pertama kali di tengah
+        // percakapan); snapshot-nya menyusul sendiri lewat pesan `snapshot`.
+        for (const l of m.lanes) this.#ensureView(l.sessionId)
         break
       }
 
@@ -237,7 +304,7 @@ class Store {
     }
     const wasOpen = this.open.includes(sessionId)
     this.open = [sessionId]
-    this.#ensureView(sessionId)
+    this.#prepare(sessionId)
     if (!wasOpen) this.#send({ t: 'subscribe', sessionId })
   }
 
@@ -250,8 +317,23 @@ class Store {
       return
     }
     this.open = [...this.open, sessionId]
-    this.#ensureView(sessionId)
+    this.#prepare(sessionId)
     this.#send({ t: 'subscribe', sessionId })
+  }
+
+  /** Siapkan wadah render sebelum snapshot datang — general beda dari session. */
+  #prepare(id: string): void {
+    if (!this.isGeneral(id)) return this.#ensureView(id)
+    if (this.generalViews[id]) return
+    const meta = this.generalMeta(id)
+    this.generalViews[id] = {
+      title: meta?.title ?? 'General',
+      lanes: meta?.lanes ?? [],
+      canPrompt: meta?.ownerId === this.me,
+      loaded: false,
+      draft: '',
+    }
+    for (const l of meta?.lanes ?? []) this.#ensureView(l.sessionId)
   }
 
   closePane(sessionId: string): void {
@@ -281,6 +363,14 @@ class Store {
 
   newSession(hostId: string, cwd: string, title: string): void {
     this.#send({ t: 'new_session', hostId, cwd, title })
+  }
+
+  /** Session lintas node. Node-nya baru ditentukan lewat `@sebutan` di prompt. */
+  newGeneral(title: string): void {
+    // Id-nya dibuat hub, jadi yang bisa kita pegang cuma judulnya; begitu
+    // roster berikutnya datang, session itu langsung dibuka.
+    this.#wantGeneral = title
+    this.#send({ t: 'new_general', title })
   }
 
   /**

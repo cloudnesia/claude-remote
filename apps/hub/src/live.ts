@@ -207,6 +207,25 @@ function flush(s: LiveSession): void {
   for (const f of batch) for (const sub of s.subs) sub(f)
 }
 
+/**
+ * Host tersambung lagi: cairkan status yang dibekukan `markHostOffline`.
+ *
+ * Tanpa ini status `offline` menetap di memori sampai agent kebetulan
+ * mengirim `status` berikutnya — dan agent hanya mengirimnya saat ada prompt.
+ * Akibatnya session yang host-nya sudah kembali tetap tampak offline, composer
+ * tetap terkunci, dan satu-satunya jalan keluar adalah mem-prompt session yang
+ * UI-nya sendiri bilang tidak bisa di-prompt.
+ */
+export function markHostOnline(sessionIds: string[]): void {
+  for (const id of sessionIds) {
+    const s = sessions.get(id)
+    if (s?.status !== 'offline') continue
+    // Buffer live yang masih terisi = giliran terpotong saat koneksi putus;
+    // agent akan me-replay sisanya, jadi 'thinking' lebih jujur dari 'idle'.
+    s.status = s.live ? 'thinking' : 'idle'
+  }
+}
+
 /** Host putus: bekukan session yang sedang jalan supaya UI tidak menggantung. */
 export function markHostOffline(sessionIds: string[]): void {
   for (const id of sessionIds) {

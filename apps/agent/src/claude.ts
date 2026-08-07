@@ -1,6 +1,7 @@
 import { accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
+import * as gateway from './gateway.ts'
 
 /**
  * Cari binary Claude Code milik user.
@@ -54,10 +55,18 @@ export function resolveClaudeBin(): string | null {
  * Opsi spawn untuk SDK. Kalau binary tidak ketemu, kembalikan objek kosong
  * supaya SDK memakai cli.js bawaannya — itu jalur yang benar saat agent
  * dijalankan dari source lewat npm, di mana paket SDK memang lengkap.
+ *
+ * `env` dibaca ULANG tiap pemanggilan, bukan di-cache seperti path binary:
+ * gateway bisa diganti dari web selagi agent hidup, dan proses berikutnya
+ * harus memakai nilai yang baru.
  */
-export function claudeSpawnOptions(): { pathToClaudeCodeExecutable?: string } {
+export function claudeSpawnOptions(): {
+  pathToClaudeCodeExecutable?: string
+  env?: Record<string, string>
+} {
   const bin = resolveClaudeBin()
-  return bin ? { pathToClaudeCodeExecutable: bin } : {}
+  const env = gateway.env()
+  return { ...(bin ? { pathToClaudeCodeExecutable: bin } : {}), ...(env ? { env } : {}) }
 }
 
 /**

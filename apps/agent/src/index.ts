@@ -7,6 +7,7 @@ import * as store from './store.ts'
 import { browse } from './fs.ts'
 import * as models from './models.ts'
 import * as config from './config.ts'
+import * as gateway from './gateway.ts'
 import { login } from './login.ts'
 import { isPackaged, resolveClaudeBin } from './claude.ts'
 
@@ -51,6 +52,24 @@ function runnerFor(sessionId: string): SessionRunner | null {
   r.model = entry.model ?? null
   runners.set(sessionId, r)
   return r
+}
+
+/**
+ * Gateway berubah: proses Claude Code yang sedang hidup masih memegang env
+ * lama, jadi mereka dimatikan. Identitas session TIDAK dibuang — `stop()`
+ * mempertahankan `claudeSessionId`, sehingga prompt berikutnya melanjutkan
+ * percakapan yang sama, cuma lewat endpoint yang baru.
+ *
+ * Daftar model ikut dikosongkan: yang tersimpan adalah milik penyedia lama,
+ * dan membiarkannya membuat pemilih model di web menawarkan model yang tidak
+ * dilayani siapa pun.
+ */
+function applyGateway(baseUrl: string | null): void {
+  for (const r of runners.values()) r.stop()
+  models.writeCache([])
+  send({ t: 'models', models: [] })
+  send({ t: 'gateway', baseUrl })
+  void refreshModels()
 }
 
 let refreshing = false
@@ -133,6 +152,20 @@ function connect(): void {
           }
         }
 
+        // Sisi sebaliknya dari rekonsiliasi: session yang sudah tidak ada di
+        // hub dibuang juga di sini. `close_session` cuma dikirim sekali, jadi
+        // yang dihapus selagi laptop mati akan tertinggal selamanya sebagai
+        // session hantu — masih memegang proses Claude saat dibangunkan.
+        const stillThere = new Set(m.sessions.map((s) => s.sessionId))
+        let pruned = 0
+        for (const sid of store.ids()) {
+          if (stillThere.has(sid)) continue
+          runners.get(sid)?.stop()
+          runners.delete(sid)
+          store.remove(sid)
+          pruned++
+        }
+
         // Kirim daftar model. Yang di-cache dikirim dulu supaya UI langsung
         // terisi; enumerasi ulang jalan di belakang untuk menangkap perubahan
         // (upgrade CLI, ganti akun) tanpa menahan startup.
@@ -140,9 +173,14 @@ function connect(): void {
         if (cached.length) send({ t: 'models', models: cached })
         void refreshModels()
 
+        // Hub tidak menyimpan kunci apa pun, jadi ia juga tidak tahu sendiri
+        // apakah laptop ini masih memakai gateway. Laporkan tiap sambung.
+        send({ t: 'gateway', baseUrl: gateway.read()?.baseUrl ?? null })
+
         console.log(
           `[agent] hello dari hub, ${replayed} frame di-replay` +
-            (restored ? `, ${restored} session dipulihkan` : ''),
+            (restored ? `, ${restored} session dipulihkan` : '') +
+            (pruned ? `, ${pruned} session dihapus` : ''),
         )
         break
       }
@@ -198,10 +236,28 @@ function connect(): void {
         break
       }
 
+      case 'set_gateway': {
+        gateway.write({ baseUrl: m.baseUrl, apiKey: m.apiKey })
+        console.log(`[agent] gateway diarahkan ke ${m.baseUrl}`)
+        applyGateway(m.baseUrl)
+        break
+      }
+
+      case 'clear_gateway': {
+        gateway.clear()
+        console.log('[agent] gateway dilepas, kembali ke login Claude lokal')
+        applyGateway(null)
+        break
+      }
+
       case 'revoked': {
         console.error(`\n[agent] Pairing laptop ini dicabut (${m.reason}).`)
         console.error('        Jalankan `company-agent login` untuk memasangkan ulang.\n')
         config.clear()
+        // Kunci gateway ikut dibuang: pairing dicabut artinya laptop ini tidak
+        // lagi menjalankan apa pun untuk akun itu, dan kunci berbayar yang
+        // tertinggal di disk tidak punya pemilik yang mengurusnya.
+        gateway.clear()
         for (const r of runners.values()) r.stop()
         process.exit(0)
       }

@@ -229,6 +229,14 @@ class Store {
         }
         break
 
+      case 'session_gone': {
+        // Tutup pane-nya di mana pun ia terbuka — termasuk tab lain yang tidak
+        // menekan tombol hapus. Roster berikutnya cuma membersihkan sidebar.
+        this.open = this.open.filter((id) => id !== m.sessionId)
+        delete this.views[m.sessionId]
+        break
+      }
+
       case 'browse_result':
         this.browseBusy = false
         this.browseResult = m.result
@@ -401,9 +409,36 @@ class Store {
     this.#send({ t: 'set_auto', sessionId, auto })
   }
 
+  /**
+   * Hapus session beserta transcript-nya. Permanen.
+   *
+   * Pane-nya tidak ditutup di sini: hub mengirim `session_gone` ke semua
+   * browser, dan menutup lokal duluan cuma membuat tab yang satu ini berbeda
+   * dari tab lain kalau ternyata hub menolak permintaannya.
+   */
+  deleteSession(sessionId: string): void {
+    this.#send({ t: 'delete_session', sessionId })
+  }
+
   /** Cabut pairing sebuah laptop. Tidak bisa dibatalkan — harus pairing ulang. */
   unbindHost(hostId: string): void {
     this.#send({ t: 'unbind_host', hostId })
+  }
+
+  /**
+   * Arahkan Claude Code di sebuah node ke gateway lain (mis. OpenRouter).
+   *
+   * Kuncinya lewat hub — hub meneruskan ke agent tanpa menyimpannya, dan yang
+   * kembali ke browser cuma base URL-nya lewat roster. Tidak ada jalur untuk
+   * membacanya lagi dari sini; mengganti berarti mengetik ulang.
+   */
+  setGateway(hostId: string, baseUrl: string, apiKey: string): void {
+    this.#send({ t: 'set_gateway', hostId, baseUrl, apiKey })
+  }
+
+  /** Kembalikan node ke login Claude lokalnya; kunci di laptop dihapus. */
+  clearGateway(hostId: string): void {
+    this.#send({ t: 'clear_gateway', hostId })
   }
 
   /** Minta daftar subdirektori di host. `path` kosong = home host. */

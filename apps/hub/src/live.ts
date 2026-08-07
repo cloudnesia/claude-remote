@@ -226,6 +226,21 @@ export function markHostOnline(sessionIds: string[]): void {
   }
 }
 
+/**
+ * Session dihapus: buang seluruh jejaknya di memori.
+ *
+ * Bukan sekadar kebersihan — tanpa ini `lastSeq` lama tetap tinggi, dan
+ * session baru yang kebetulan memakai id sama (agent yang me-replay outbox
+ * lawas, misalnya) akan dibuang diam-diam oleh cek duplikat di `ingest`.
+ */
+export function dropSession(sessionId: string): void {
+  const s = sessions.get(sessionId)
+  if (!s) return
+  if (s.timer) clearTimeout(s.timer)
+  s.subs.clear()
+  sessions.delete(sessionId)
+}
+
 /** Host putus: bekukan session yang sedang jalan supaya UI tidak menggantung. */
 export function markHostOffline(sessionIds: string[]): void {
   for (const id of sessionIds) {

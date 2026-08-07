@@ -5,12 +5,14 @@
   import GeneralPane from '$lib/GeneralPane.svelte'
   import PairDialog from '$lib/PairDialog.svelte'
   import NewSessionDialog from '$lib/NewSessionDialog.svelte'
+  import GatewayDialog from '$lib/GatewayDialog.svelte'
   import type { HostMeta } from '@company/protocol'
 
   let tokenInput = $state('')
   let token = $state<string | null>(null)
   let pairing = $state(false)
   let newFor = $state<HostMeta | null>(null)
+  let gatewayFor = $state<HostMeta | null>(null)
 
   $effect(() => {
     // Token dev: dari ?token= sekali, lalu disimpan. Login user sungguhan
@@ -58,7 +60,11 @@
   </div>
 {:else}
   <div class="app">
-    <Sidebar onpair={() => (pairing = true)} onnew={(h) => (newFor = h)} />
+    <Sidebar
+      onpair={() => (pairing = true)}
+      onnew={(h) => (newFor = h)}
+      ongateway={(h) => (gatewayFor = h)}
+    />
 
     <main>
       {#if store.open.length === 0}
@@ -84,6 +90,10 @@
 
   {#if newFor}
     <NewSessionDialog host={newFor} onclose={() => (newFor = null)} />
+  {/if}
+
+  {#if gatewayFor}
+    <GatewayDialog host={gatewayFor} onclose={() => (gatewayFor = null)} />
   {/if}
 
   {#if store.notice}

@@ -14,6 +14,7 @@ import * as db from './db.ts'
 import * as pairing from './pairing.ts'
 import { route } from './general.ts'
 import {
+  dropSession,
   ingest,
   lastSeqOf,
   markHostOffline,
@@ -338,6 +339,15 @@ function onAgent(ws: WebSocket, host: db.HostRow): void {
         break
       }
 
+      case 'gateway': {
+        db.setHostGateway(host.id, m.baseUrl)
+        console.log(
+          `[hub] host ${host.name} ${m.baseUrl ? `memakai gateway ${m.baseUrl}` : 'kembali ke login Claude lokal'}`,
+        )
+        broadcastRoster()
+        break
+      }
+
       case 'browse_result': {
         const pending = browseReqs.get(m.reqId)
         if (!pending) return // sudah kedaluwarsa atau browser sudah pergi
@@ -416,6 +426,36 @@ function onBrowser(ws: WebSocket, user: db.UserRow): void {
       return
     }
 
+    if (m.t === 'set_gateway' || m.t === 'clear_gateway') {
+      const host = db.hostById(m.hostId)
+      if (!host || host.owner_id !== user.id) {
+        return sendBrowser(conn, { t: 'denied', action: m.t, reason: 'bukan host milikmu' })
+      }
+      // Kunci tidak disimpan di mana pun di sini, jadi tidak ada yang bisa
+      // dikirim menyusul saat laptop bangun. Perintah ini butuh agent hidup.
+      if (!isOnline(host.id)) {
+        return sendBrowser(conn, { t: 'denied', action: m.t, reason: 'host sedang offline' })
+      }
+
+      if (m.t === 'clear_gateway') {
+        sendAgent(host.id, { t: 'clear_gateway' })
+        return
+      }
+
+      const baseUrl = m.baseUrl.trim()
+      if (!/^https?:\/\/[^\s]+$/i.test(baseUrl) || baseUrl.length > 300) {
+        return sendBrowser(conn, { t: 'denied', action: m.t, reason: 'base URL tidak valid' })
+      }
+      if (!m.apiKey || m.apiKey.length > 500) {
+        return sendBrowser(conn, { t: 'denied', action: m.t, reason: 'API key tidak valid' })
+      }
+
+      // Diteruskan apa adanya lalu dilupakan — tidak ditulis ke DB, tidak
+      // di-log. Yang tersimpan menyusul hanya `baseUrl`, saat agent melapor.
+      sendAgent(host.id, { t: 'set_gateway', baseUrl, apiKey: m.apiKey })
+      return
+    }
+
     if (m.t === 'new_session') {
       const host = db.hostById(m.hostId)
       if (!host || host.owner_id !== user.id) {
@@ -490,6 +530,40 @@ function onBrowser(ws: WebSocket, user: db.UserRow): void {
     if (!db.canWrite(s, user.id)) {
       return sendBrowser(conn, { t: 'denied', action: m.t, reason: 'hanya owner yang bisa' })
     }
+
+    // Hapus sengaja diproses SEBELUM syarat host online: session yang laptopnya
+    // sudah pensiun justru yang paling ingin dibersihkan, dan menuntut host
+    // hidup membuatnya tidak pernah bisa dihapus sama sekali.
+    if (m.t === 'delete_session') {
+      // Lane general tidak dihapus satuan: ia tidak muncul di bawah node, dan
+      // melepas satu lane meninggalkan general dengan riwayat setengah.
+      if (s.general_id) {
+        return sendBrowser(conn, {
+          t: 'denied',
+          action: m.t,
+          reason: 'lane general tidak bisa dihapus satuan',
+        })
+      }
+
+      // Agent memberhentikan prosesnya dan membuang registry lokalnya. Kalau
+      // laptopnya offline pesan ini hilang — pemangkasannya menyusul saat
+      // `hello` berikutnya, lewat daftar session yang dibawa hub.
+      sendAgent(s.host_id, { t: 'close_session', sessionId: s.id })
+
+      db.deleteSession(s.id)
+      dropSession(s.id)
+      const gone = db.pruneRevokedHost(s.host_id)
+
+      for (const c of browsers) {
+        c.unsubs.get(s.id)?.()
+        c.unsubs.delete(s.id)
+        sendBrowser(c, { t: 'session_gone', sessionId: s.id })
+      }
+      console.log(`[hub] session ${s.id.slice(0, 8)} dihapus${gone ? ', host ikut dibuang' : ''}`)
+      broadcastRoster()
+      return
+    }
+
     if (!isOnline(s.host_id)) {
       return sendBrowser(conn, { t: 'denied', action: m.t, reason: 'host sedang offline' })
     }

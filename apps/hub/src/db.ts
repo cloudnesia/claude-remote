@@ -93,6 +93,9 @@ addColumn('sessions', 'auto', 'INTEGER NOT NULL DEFAULT 0')
 addColumn('sessions', 'model', 'TEXT')
 addColumn('hosts', 'models', "TEXT NOT NULL DEFAULT '[]'")
 addColumn('hosts', 'revoked', 'INTEGER NOT NULL DEFAULT 0')
+// Base URL gateway saja. Kuncinya SENGAJA tidak punya kolom di sini — hub
+// meneruskannya ke agent dan melupakannya (lihat PROTOCOL.md §7).
+addColumn('hosts', 'gateway_url', 'TEXT')
 // NULL = session biasa. Terisi = lane milik sebuah general session.
 addColumn('sessions', 'general_id', 'TEXT')
 db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_general ON sessions(general_id)')
@@ -129,11 +132,13 @@ const q = {
   setAuto: db.prepare('UPDATE sessions SET auto = ? WHERE id = ?'),
   setModel: db.prepare('UPDATE sessions SET model = ? WHERE id = ?'),
   setHostModels: db.prepare('UPDATE hosts SET models = ? WHERE id = ?'),
+  setHostGateway: db.prepare('UPDATE hosts SET gateway_url = ? WHERE id = ?'),
   insertSession: db.prepare(`
     INSERT INTO sessions
       (id, host_id, owner_id, title, cwd, visibility, general_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   touchSession: db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?'),
+  deleteSession: db.prepare('DELETE FROM sessions WHERE id = ?'),
   setClaudeSid: db.prepare('UPDATE sessions SET claude_session_id = ? WHERE id = ?'),
   setAcked: db.prepare('UPDATE sessions SET acked_seq = ? WHERE id = ? AND acked_seq < ?'),
   seenHost: db.prepare('UPDATE hosts SET last_seen = ?, platform = ?, name = ? WHERE id = ?'),
@@ -152,6 +157,8 @@ export type HostRow = {
   token: string
   models: string
   revoked: number
+  /** Base URL gateway, atau null kalau host memakai login Claude lokalnya. */
+  gateway_url: string | null
   last_seen: number
 }
 export type SessionRow = {
@@ -185,7 +192,9 @@ export const hostById = (id: string) => (q.hostById.get(id) as HostRow) ?? null
 export const sessionById = (id: string) => (q.sessionById.get(id) as SessionRow) ?? null
 export const hostsOf = (ownerId: string) => q.hostsOf.all(ownerId) as HostRow[]
 
-export function createHost(h: Omit<HostRow, 'last_seen' | 'models'>): void {
+export function createHost(
+  h: Omit<HostRow, 'last_seen' | 'models' | 'revoked' | 'gateway_url'>,
+): void {
   db.prepare(
     'INSERT INTO hosts (id, owner_id, name, platform, token, last_seen) VALUES (?, ?, ?, ?, ?, 0)',
   ).run(h.id, h.owner_id, h.name, h.platform, h.token)
@@ -245,8 +254,46 @@ export function revokeHost(hostId: string): { deleted: boolean } {
   return { deleted: false }
 }
 
+/**
+ * Hapus session beserta seluruh transcript-nya. Permanen.
+ *
+ * Baris `messages` ikut terbawa lewat ON DELETE CASCADE — `PRAGMA
+ * foreign_keys = ON` di atas yang membuatnya benar-benar jalan; tanpa pragma
+ * itu SQLite diam saja dan meninggalkan ribuan baris yatim yang tidak akan
+ * pernah terbaca lagi.
+ */
+export function deleteSession(id: string): void {
+  q.deleteSession.run(id)
+}
+
+/**
+ * Host yang sudah dicabut dan tidak lagi memegang session apa pun: buang.
+ * Menyimpan transcript adalah satu-satunya alasan row-nya dipertahankan saat
+ * pencabutan (lihat `revokeHost`), jadi begitu session terakhirnya dihapus
+ * yang tersisa cuma nama mati di sidebar.
+ */
+export function pruneRevokedHost(hostId: string): boolean {
+  const h = hostById(hostId)
+  if (!h || !h.revoked) return false
+  const n = (
+    db.prepare('SELECT COUNT(*) c FROM sessions WHERE host_id = ?').get(hostId) as { c: number }
+  ).c
+  if (n > 0) return false
+  db.prepare('DELETE FROM hosts WHERE id = ?').run(hostId)
+  return true
+}
+
 export function setHostModels(hostId: string, models: unknown): void {
   q.setHostModels.run(JSON.stringify(models), hostId)
+}
+
+/**
+ * Catat gateway sebuah host. Hanya base URL — dipanggil dari laporan agent,
+ * bukan saat hub meneruskan perintah, karena yang menentukan adalah file di
+ * laptop dan perintahnya bisa saja tidak sampai.
+ */
+export function setHostGateway(hostId: string, baseUrl: string | null): void {
+  q.setHostGateway.run(baseUrl, hostId)
 }
 
 export function sessionIdsOfHost(hostId: string): string[] {
@@ -392,6 +439,7 @@ export function roster(
       online: isOnline(h.id),
       revoked: !!h.revoked,
       models: JSON.parse(h.models || '[]'),
+      gateway: h.gateway_url ?? null,
       sessions: (q.sessionsOf.all(h.id) as SessionRow[])
         .filter((s) => s.visibility !== 'private' || s.owner_id === visibleTo)
         .map((s) => ({

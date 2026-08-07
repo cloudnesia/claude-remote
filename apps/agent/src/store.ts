@@ -34,6 +34,8 @@ function save(): void {
 
 export const get = (id: string): Entry | undefined => cache[id]
 
+export const ids = (): string[] => Object.keys(cache)
+
 export function put(id: string, e: Entry): void {
   cache[id] = { ...cache[id], ...e }
   save()

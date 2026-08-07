@@ -5,7 +5,12 @@
   let {
     onpair,
     onnew,
-  }: { onpair: () => void; onnew: (host: HostMeta) => void } = $props()
+    ongateway,
+  }: {
+    onpair: () => void
+    onnew: (host: HostMeta) => void
+    ongateway: (host: HostMeta) => void
+  } = $props()
 
   /** Host yang menunggu konfirmasi lepas. Dua langkah, bukan modal. */
   let confirming = $state<string | null>(null)
@@ -23,6 +28,24 @@
     if (timer) clearTimeout(timer)
     confirming = null
     store.unbindHost(hostId)
+  }
+
+  /** Session yang menunggu konfirmasi hapus. Dua langkah, sama seperti lepas
+   * node — bedanya yang ini ikut membawa transcript, jadi tidak boleh sekali
+   * klik dari tombol yang duduk persis di sebelah tombol buka pane. */
+  let confirmDel = $state<string | null>(null)
+  let delTimer: ReturnType<typeof setTimeout> | null = null
+
+  function askDelete(sessionId: string) {
+    confirmDel = sessionId
+    if (delTimer) clearTimeout(delTimer)
+    delTimer = setTimeout(() => (confirmDel = null), 5000)
+  }
+
+  function doDelete(sessionId: string) {
+    if (delTimer) clearTimeout(delTimer)
+    confirmDel = null
+    store.deleteSession(sessionId)
   }
 
   const dot: Record<string, string> = {
@@ -145,12 +168,26 @@
             </span>
             <span class="host-text">{getDisplayName(host, allHosts)}</span>
             {#if host.revoked}<span class="tag">dilepas</span>{/if}
+            {#if host.gateway && !host.revoked}
+              <span class="tag gw" title={`Claude Code di node ini diarahkan ke ${host.gateway}`}>
+                gateway
+              </span>
+            {/if}
             {#if hasDuplicateName(host, allHosts) && !host.revoked}
               <span class="tag warn" title="Nama duplikat terdeteksi">⚠ duplikat</span>
             {/if}
           </span>
           {#if user.id === store.me && !host.revoked}
             <span class="hostacts">
+              {#if host.online}
+                <button
+                  class="unbind"
+                  onclick={() => ongateway(host)}
+                  title="Arahkan Claude Code node ini ke gateway lain"
+                >
+                  gateway
+                </button>
+              {/if}
               {#if confirming === host.id}
                 <button class="unbind confirm" onclick={() => doUnbind(host.id)}>
                   yakin lepas?
@@ -191,6 +228,21 @@
               >
                 ⊞
               </button>
+            {/if}
+            {#if s.ownerId === store.me}
+              {#if confirmDel === s.id}
+                <button class="del confirm" onclick={() => doDelete(s.id)}>
+                  hapus?
+                </button>
+              {:else}
+                <button
+                  class="del"
+                  onclick={() => askDelete(s.id)}
+                  title="Hapus session ini beserta transcript-nya"
+                >
+                  ×
+                </button>
+              {/if}
             {/if}
           </div>
         {:else}
@@ -390,6 +442,12 @@
     padding: 1px 4px;
     border-radius: 2px;
   }
+  .tag.gw {
+    color: #7dd3a0;
+    background: rgba(63, 185, 80, 0.14);
+    padding: 1px 4px;
+    border-radius: 2px;
+  }
   .unbind {
     background: none;
     border: none;
@@ -496,6 +554,30 @@
     color: #4a9eff;
     transform: scale(1.15);
   }
+  .del {
+    background: none;
+    border: none;
+    color: #6b7280;
+    font: inherit;
+    font-size: 15px;
+    line-height: 1;
+    padding: 0 9px 0 3px;
+    flex: none;
+    cursor: pointer;
+    opacity: 0;
+  }
+  .row:hover .del {
+    opacity: 1;
+  }
+  .del:hover {
+    color: #e5534b;
+  }
+  .del.confirm {
+    opacity: 1;
+    color: #e5534b;
+    font-size: 10px;
+    font-weight: 600;
+  }
   .empty {
     padding: 3px 24px;
     font-size: 12px;
@@ -577,6 +659,13 @@
       font-size: 14px;
     }
     .pin {
+      font-size: 18px;
+      padding: 0 12px 0 6px;
+    }
+    /* Tidak ada hover di layar sentuh: tombol yang cuma muncul saat hover
+       artinya tidak pernah muncul sama sekali. */
+    .del {
+      opacity: 1;
       font-size: 18px;
       padding: 0 12px 0 6px;
     }

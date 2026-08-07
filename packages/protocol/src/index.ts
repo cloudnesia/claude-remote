@@ -191,6 +191,17 @@ export type SessionSpec = {
   model: string | null
 }
 
+/**
+ * Gateway LLM sebuah node: Claude Code di laptop itu diarahkan ke endpoint lain
+ * (mis. OpenRouter) alih-alih memakai login Claude miliknya.
+ *
+ * `apiKey` HANYA bergerak satu arah — browser → hub → agent — dan tidak pernah
+ * ikut dalam roster, snapshot, atau apa pun yang kembali ke browser. Hub
+ * meneruskannya tanpa menyimpannya; yang tersimpan di DB hub cuma `baseUrl`,
+ * karena itulah satu-satunya bagian yang perlu ditampilkan lagi nanti.
+ */
+export type Gateway = { baseUrl: string; apiKey: string }
+
 export type HubToAgent =
   | {
       t: 'hello'
@@ -215,6 +226,10 @@ export type HubToAgent =
   /** `answers` hanya untuk `ASK_TOOL`; diabaikan untuk tool lain. */
   | { t: 'approval_resp'; sessionId: string; reqId: string; decision: Decision; answers?: Answers }
   | { t: 'close_session'; sessionId: string }
+  /** Simpan gateway di laptop ini dan pakai untuk proses Claude Code berikutnya. */
+  | { t: 'set_gateway'; baseUrl: string; apiKey: string }
+  /** Kembali memakai login Claude lokal; kunci di laptop dihapus. */
+  | { t: 'clear_gateway' }
   | { t: 'ack'; sessionId: string; seq: number }
 
 export type AgentToHub =
@@ -229,6 +244,13 @@ export type AgentToHub =
   | { t: 'frame'; frame: Frame }
   | { t: 'browse_result'; reqId: string; result: BrowseResult }
   | { t: 'models'; models: ModelInfo[] }
+  /**
+   * Keadaan gateway menurut laptop — `null` berarti kembali ke login Claude
+   * lokal. Agent yang melapor, bukan hub yang mencatat saat mengirim perintah:
+   * yang benar-benar menentukan adalah file di laptop, dan pesan `set_gateway`
+   * bisa saja tidak sampai.
+   */
+  | { t: 'gateway'; baseUrl: string | null }
 
 // ----------------------------------------------------------- browser <-> hub
 
@@ -249,6 +271,12 @@ export type BrowserToHub =
   | { t: 'set_model'; sessionId: string; model: string | null }
   /** Cabut pairing sebuah laptop. Owner host saja. */
   | { t: 'unbind_host'; hostId: string }
+  /** Arahkan Claude Code di node ini ke gateway lain. Owner host saja. */
+  | { t: 'set_gateway'; hostId: string; baseUrl: string; apiKey: string }
+  /** Kembalikan node ini ke login Claude lokalnya. Owner host saja. */
+  | { t: 'clear_gateway'; hostId: string }
+  /** Hapus session beserta transcript-nya. Owner session saja, permanen. */
+  | { t: 'delete_session'; sessionId: string }
 
 export type Visibility = 'private' | 'team' | 'public'
 
@@ -275,6 +303,11 @@ export type HostMeta = {
   revoked: boolean
   /** Kosong sampai agent selesai mengenumerasi (butuh Claude Code hidup). */
   models: ModelInfo[]
+  /**
+   * Base URL gateway kalau node ini tidak memakai login Claude lokalnya.
+   * Kuncinya TIDAK ada di sini dan tidak pernah dikirim balik ke browser.
+   */
+  gateway: string | null
   /** Session biasa saja. Lane milik general session TIDAK ikut di sini. */
   sessions: SessionMeta[]
 }
@@ -359,6 +392,12 @@ export type HubToBrowser =
     }
   | { t: 'frame'; frame: Frame }
   | { t: 'host_status'; hostId: string; online: boolean }
+  /**
+   * Session sudah dihapus. Dikirim ke SEMUA browser, bukan cuma yang menghapus:
+   * pane yang terbuka di tab lain harus ikut tutup, kalau tidak ia menampilkan
+   * transcript yang sudah tidak ada dan prompt ke sana hilang tanpa jejak.
+   */
+  | { t: 'session_gone'; sessionId: string }
   | { t: 'browse_result'; hostId: string; result: BrowseResult }
   | { t: 'denied'; action: string; reason: string }
 

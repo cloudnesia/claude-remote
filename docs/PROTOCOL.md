@@ -107,6 +107,8 @@ bikin sistem jalan dari wifi kafe / di belakang NAT.
 | `interrupt`      | `sessionId`                             | setara ESC |
 | `approval_resp`  | `sessionId`, `reqId`, `decision`, `answers?` | `allow` \| `deny` \| `allow_always`; `answers` khusus `AskUserQuestion` |
 | `close_session`  | `sessionId`                             | matikan proses, session jadi arsip |
+| `set_gateway`    | `baseUrl`, `apiKey`                     | arahkan Claude Code laptop ini ke endpoint lain |
+| `clear_gateway`  | —                                       | kembali ke login Claude lokal; kunci di laptop dihapus |
 | `ack`            | `sessionId`, `seq`                      | hub sudah tahan lama frame ≤ seq; agent boleh trim buffer |
 
 `resumeFrom` adalah inti recovery. Setelah reconnect, agent mengirim ulang
@@ -154,6 +156,7 @@ replay setelah reconnect.
 | `frame`           | `Frame`                                         | event stream |
 | `browse_result`   | `reqId`, `result`                               | jawaban `browse` |
 | `models`          | `models: ModelInfo[]`                           | model yang tersedia di host |
+| `gateway`         | `baseUrl: string \| null`                       | keadaan gateway menurut laptop; `null` = login Claude lokal |
 | `pong`            | —                                               | balasan heartbeat |
 
 ---
@@ -174,6 +177,9 @@ replay setelah reconnect.
 | `set_auto`    | `sessionId`, `auto`                | owner saja |
 | `set_model`   | `sessionId`, `model`               | owner saja |
 | `browse`      | `hostId`, `path`                   | owner host saja |
+| `delete_session` | `sessionId`                     | owner saja; **permanen**, host boleh offline |
+| `set_gateway`   | `hostId`, `baseUrl`, `apiKey`      | owner host saja, host wajib online — lihat §12 |
+| `clear_gateway` | `hostId`                           | owner host saja, host wajib online |
 
 `subscribe`, `unsubscribe`, `prompt`, dan `interrupt` menerima id **general
 session** juga; hub yang membedakannya, browser mengirim pesan yang sama.
@@ -187,7 +193,24 @@ session** juga; hub yang membedakannya, browser mengirim pesan yang sama.
 | `general`     | `sessionId`, `title`, `lanes[]`, `canPrompt` | susunan lane sebuah general session (§11) |
 | `frame`       | `Frame` (sudah di-coalesce)                 | stream live |
 | `host_status` | `hostId`, `online`                          | |
+| `session_gone` | `sessionId`                                | session dihapus; semua browser menutup pane-nya |
 | `denied`      | `action`, `reason`                          | |
+
+### Kenapa `delete_session` tidak menuntut host online
+
+Semua aksi tulis lain ditolak saat host offline, karena ujungnya memang tidak
+ada yang mengeksekusi. Hapus kebalikannya: session yang laptopnya sudah
+pensiun justru yang paling ingin dibersihkan, dan menuntut host hidup membuat
+session itu tidak pernah bisa hilang dari sidebar.
+
+Karena itu hub menghapus dari DB duluan lalu mengirim `close_session` sebagai
+usaha terbaik. Pesan yang hilang tidak jadi masalah: `hello` membawa daftar
+lengkap session milik host, dan agent memangkas apa pun di registry lokalnya
+yang tidak ada di daftar itu — arah sebaliknya dari rekonsiliasi di §3.
+
+Lane milik general session **ditolak** lewat jalur ini. Ia tidak muncul di
+bawah node, dan melepas satu lane meninggalkan general dengan riwayat yang
+sudah tidak bisa dijelaskan.
 
 ### Kenapa `snapshot` punya field `live`
 
@@ -208,6 +231,7 @@ Ditegakkan di **hub**, bukan di UI. Tombol yang di-disable bukan kontrol akses.
 |-------------------|-------|
 | baca transcript   | sesuai `sessions.visibility`: `private` (owner) / `team` (semua user login) / `public` |
 | prompt, interrupt, approve, close | **owner session saja** |
+| hapus session     | **owner session saja**; transcript ikut hilang |
 | buat session      | owner dari host tersebut saja |
 
 Batas ini disengaja dan bukan sekadar soal keamanan. Karena tiap agent memakai
@@ -386,3 +410,49 @@ alasannya juga sama — tiap lane membakar subscription Claude milik pemilik
 laptop.
 
 `interrupt` ke sebuah general diteruskan ke **semua** lane-nya.
+
+---
+
+## 12. Gateway per node
+
+Sebuah node bisa diarahkan ke endpoint lain yang bicara Anthropic Messages API
+(mis. OpenRouter) alih-alih memakai login Claude di laptop itu. Agent menyimpan
+`baseUrl` + `apiKey` di `~/.company-agent/gateway.json` (mode `0600`) dan
+menyuntikkannya sebagai environment ke tiap proses Claude Code yang ia spawn:
+
+```
+ANTHROPIC_BASE_URL   = baseUrl
+ANTHROPIC_API_KEY    = apiKey
+ANTHROPIC_AUTH_TOKEN = ""      (dikosongkan, bukan dibiarkan — lihat bawah)
+CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = 1
+```
+
+`ANTHROPIC_AUTH_TOKEN` dikosongkan secara eksplisit karena env agent diwarisi
+apa adanya ke proses anak: kalau nilainya kebetulan ada di shell profile user,
+ia menang atas kunci gateway dan gejalanya 401 dari endpoint yang kredensialnya
+kelihatan sudah benar.
+
+### Kunci lewat hub, tapi tidak tinggal di hub
+
+Ini melonggarkan janji "hub tidak pernah melihat kredensial" — dan itu memang
+harga dari mengonfigurasinya lewat web. Yang bisa dijaga tetap dijaga:
+
+- Hub **meneruskan** `set_gateway` ke agent lalu melupakannya. Tidak ada kolom
+  untuk kunci di DB hub, dan kunci tidak pernah masuk log.
+- Yang tersimpan di `hosts.gateway_url` cuma base URL, dan hanya setelah
+  **agent melapor** lewat `gateway` — bukan saat hub mengirim perintah. Yang
+  menentukan adalah file di laptop; perintahnya bisa saja tidak sampai.
+- Kunci tidak pernah kembali ke browser. Roster hanya membawa `baseUrl`, jadi
+  mengganti kunci selalu berarti mengetik ulang.
+- `set_gateway` menuntut host **online**: tidak ada kunci yang mengendap di
+  hub menunggu laptop bangun.
+- Pencabutan pairing menghapus `gateway.json` sekalian — kunci berbayar yang
+  tertinggal di disk tidak punya pemilik yang mengurusnya.
+
+### Efek samping yang disengaja
+
+Ganti gateway → semua runner di node itu **dimatikan** (proses lama memegang
+env lama) dan daftar model **dikosongkan** lalu dienumerasi ulang. Identitas
+session dipertahankan, jadi prompt berikutnya melanjutkan percakapan yang sama
+lewat endpoint baru. Daftar model yang tidak dikosongkan akan menawarkan model
+milik penyedia lama — yang tidak dilayani siapa pun.

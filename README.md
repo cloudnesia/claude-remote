@@ -6,7 +6,7 @@ pemiliknya sendiri** dengan subscription-nya sendiri. Web hanya antarmuka.
 ```
 Laptop A ──┐
 Laptop B ──┼──► Hub (WS relay + SQLite)  ◄──► Browser (SvelteKit)
-Laptop C ──┘     tidak pernah melihat kredensial Claude,
+Laptop C ──┘     tidak menyimpan kredensial Claude,
                  tidak pernah memanggil API Anthropic
 ```
 
@@ -49,6 +49,23 @@ npm run agent             # = company-agent start
 
 Kredensial Claude user tidak pernah lewat hub — agent memakai `~/.claude`
 di laptopnya sebagai proses lokal biasa.
+
+## Node dengan gateway sendiri (OpenRouter dll.)
+
+Sebuah node bisa diarahkan ke endpoint lain yang bicara Anthropic Messages API
+alih-alih login Claude di laptop itu. Di sidebar, hover node yang online lalu
+klik **gateway**, isi base URL (`https://openrouter.ai/api` untuk OpenRouter —
+tanpa `/v1/messages`, Claude Code yang menambahkannya) dan API key-nya.
+
+Ini satu-satunya jalur di mana sebuah kunci melewati hub. Hub **meneruskan
+tanpa menyimpan**: kunci mendarat di `~/.company-agent/gateway.json` (mode
+`0600`) di laptop itu, yang tercatat di DB hub cuma base URL-nya, dan kunci
+tidak pernah kembali ke browser — mengganti berarti mengetik ulang. Pakai hub
+yang kamu percaya dan HTTPS. Rinciannya di `docs/PROTOCOL.md` §12.
+
+Claude Code tetap harus terpasang di laptop itu (ia yang jadi harness), tapi
+tidak perlu login. Penagihan pindah ke penyedia gateway — node yang dibiarkan
+`auto` akan membakar kredit tanpa rem.
 
 `npm run seed` membuat dua user (Savana, Rekan) supaya visibility antar-user
 bisa langsung dicoba. Login user sungguhan belum ada; token seeder masih jadi

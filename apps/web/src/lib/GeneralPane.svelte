@@ -74,7 +74,7 @@
         </button>
       {/if}
       {#if closable}
-        <button class="icon" onclick={() => store.closePane(sessionId)} title="Tutup pane">✕</button>
+        <button class="icon" onclick={() => store.closePane(sessionId)} title="Tutup tab">✕</button>
       {/if}
     </div>
   </header>

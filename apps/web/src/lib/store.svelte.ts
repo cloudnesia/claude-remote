@@ -16,8 +16,8 @@ import {
 
 import { HUB, HUB_HTTP } from './hub-url.ts'
 
-/** Batas pane terbuka. Tiap pane satu subscription; lebih dari ini tak terbaca. */
-export const MAX_PANES = 3
+/** Batas tab terbuka. Tiap tab satu subscription; lebih dari ini cuma jadi beban. */
+export const MAX_TABS = 8
 
 export type SessionView = {
   messages: Message[]
@@ -48,8 +48,10 @@ class Store {
   users = $state<UserMeta[]>([])
   me = $state('')
   connected = $state(false)
-  /** Session yang sedang terbuka, kiri ke kanan. */
+  /** Tab yang sedang terbuka, kiri ke kanan — semua tetap subscribed walau tidak sedang dilihat. */
   open = $state<string[]>([])
+  /** Tab yang sedang ditampilkan di main. Null hanya kalau `open` kosong. */
+  active = $state<string | null>(null)
   views = $state<Record<string, SessionView>>({})
   generalViews = $state<Record<string, GeneralView>>({})
   notice = $state<string | null>(null)
@@ -96,6 +98,16 @@ class Store {
     return this.generalViews[id] ?? null
   }
 
+  /** Nama node pemilik sebuah session biasa — label tab. Null untuk general. */
+  hostNameOf(sessionId: string): string | null {
+    const m = this.meta(sessionId)
+    if (!m) return null
+    for (const u of this.users) {
+      for (const h of u.hosts) if (h.id === m.hostId) return h.name
+    }
+    return null
+  }
+
   /** Semua node milikku — bahan untuk pelengkap `@` di composer. */
   get myHosts() {
     return this.users.find((u) => u.id === this.me)?.hosts.filter((h) => !h.revoked) ?? []
@@ -136,6 +148,7 @@ class Store {
     this.#token = ''
     this.connected = false
     this.open = []
+    this.active = null
     this.views = {}
     this.users = []
     this.authError = reason
@@ -230,10 +243,11 @@ class Store {
         break
 
       case 'session_gone': {
-        // Tutup pane-nya di mana pun ia terbuka — termasuk tab lain yang tidak
-        // menekan tombol hapus. Roster berikutnya cuma membersihkan sidebar.
+        // Tutup tab-nya di mana pun ia terbuka — termasuk browser lain yang
+        // tidak menekan tombol hapus. Roster berikutnya cuma membersihkan sidebar.
         this.open = this.open.filter((id) => id !== m.sessionId)
         delete this.views[m.sessionId]
+        if (this.active === m.sessionId) this.active = this.open[0] ?? null
         break
       }
 
@@ -304,29 +318,26 @@ class Store {
     }
   }
 
-  /** Buka sendirian, menutup pane lain. */
+  /**
+   * Buka sebagai tab (kalau belum) dan jadikan yang aktif — tab lain yang
+   * sudah terbuka TETAP terbuka di belakang, seperti tab browser. Ini satu
+   * jalur untuk "klik session di sidebar" maupun "pindah ke tab yang sudah
+   * ada"; bedanya cuma pada `wasOpen`.
+   */
   focus(sessionId: string): void {
-    if (this.open.length === 1 && this.open[0] === sessionId) return
-    for (const id of this.open) {
-      if (id !== sessionId) this.#send({ t: 'unsubscribe', sessionId: id })
-    }
+    if (this.active === sessionId) return
     const wasOpen = this.open.includes(sessionId)
-    this.open = [sessionId]
+    if (!wasOpen) {
+      if (this.open.length >= MAX_TABS) {
+        this.notice = `Maksimal ${MAX_TABS} tab terbuka — tutup salah satu dulu`
+        setTimeout(() => (this.notice = null), 3000)
+        return
+      }
+      this.open = [...this.open, sessionId]
+    }
+    this.active = sessionId
     this.#prepare(sessionId)
     if (!wasOpen) this.#send({ t: 'subscribe', sessionId })
-  }
-
-  /** Tambah sebagai pane baru di sebelah yang sudah ada. */
-  addPane(sessionId: string): void {
-    if (this.open.includes(sessionId)) return
-    if (this.open.length >= MAX_PANES) {
-      this.notice = `Maksimal ${MAX_PANES} pane terbuka`
-      setTimeout(() => (this.notice = null), 3000)
-      return
-    }
-    this.open = [...this.open, sessionId]
-    this.#prepare(sessionId)
-    this.#send({ t: 'subscribe', sessionId })
   }
 
   /** Siapkan wadah render sebelum snapshot datang — general beda dari session. */
@@ -344,9 +355,17 @@ class Store {
     for (const l of meta?.lanes ?? []) this.#ensureView(l.sessionId)
   }
 
+  /** Tutup satu tab. Kalau itu tab yang sedang dilihat, pindah ke tetangganya. */
   closePane(sessionId: string): void {
+    const idx = this.open.indexOf(sessionId)
+    if (idx === -1) return
     this.open = this.open.filter((id) => id !== sessionId)
     this.#send({ t: 'unsubscribe', sessionId })
+    if (this.active === sessionId) {
+      // Tab yang sekarang menempati posisi yang sama (dulu di kanan), atau
+      // kalau ini yang terakhir, tab sebelumnya. Kosong kalau tidak ada lagi.
+      this.active = this.open[idx] ?? this.open[idx - 1] ?? null
+    }
   }
 
   // ------------------------------------------------------------------ aksi

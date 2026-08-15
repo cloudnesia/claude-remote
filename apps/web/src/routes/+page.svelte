@@ -1,6 +1,7 @@
 <script lang="ts">
   import { store } from '$lib/store.svelte.ts'
   import Sidebar from '$lib/Sidebar.svelte'
+  import TabBar from '$lib/TabBar.svelte'
   import Pane from '$lib/Pane.svelte'
   import GeneralPane from '$lib/GeneralPane.svelte'
   import PairDialog from '$lib/PairDialog.svelte'
@@ -70,16 +71,17 @@
       {#if store.open.length === 0}
         <div class="blank">
           Pilih session di kiri.
-          <span class="tip">Arahkan kursor ke session lain lalu klik ⊞ untuk membukanya berdampingan.</span>
+          <span class="tip">Klik session lain kapan saja — terbuka sebagai tab baru, yang lama tidak tertutup.</span>
         </div>
       {:else}
-        {#each store.open as id (id)}
-          {#if store.isGeneral(id)}
-            <GeneralPane sessionId={id} closable={store.open.length > 1} />
+        <TabBar />
+        {#if store.active}
+          {#if store.isGeneral(store.active)}
+            <GeneralPane sessionId={store.active} closable={true} />
           {:else}
-            <Pane sessionId={id} closable={store.open.length > 1} />
+            <Pane sessionId={store.active} closable={true} />
           {/if}
-        {/each}
+        {/if}
       {/if}
     </main>
   </div>
@@ -118,7 +120,9 @@
   main {
     flex: 1;
     display: flex;
+    flex-direction: column;
     min-width: 0;
+    min-height: 0;
   }
   .blank {
     flex: 1;

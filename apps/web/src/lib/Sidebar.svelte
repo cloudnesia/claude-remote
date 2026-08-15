@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { store, MAX_PANES } from './store.svelte.ts'
+  import { store } from './store.svelte.ts'
   import type { GeneralMeta, HostMeta } from '@company/protocol'
 
   let {
@@ -101,7 +101,7 @@
   <div class="branding">
     <div class="app-info">
       <div class="app-name">claude-remote</div>
-      <div class="app-version">v0.5.3</div>
+      <div class="app-version">v0.6.0</div>
     </div>
     <a
       href="https://github.com/yourusername/claude-remote"
@@ -130,20 +130,14 @@
     </header>
 
     {#each store.myGenerals as g (g.id)}
-      {@const isOpen = store.open.includes(g.id)}
       {@const st = generalStatus(g)}
-      <div class="row" class:active={isOpen}>
+      <div class="row" class:active={store.active === g.id}>
         <button class="session general" onclick={() => store.focus(g.id)}>
           <span class="dot" style:background={dot[st]}></span>
           <span class="title">{g.title}</span>
           {#if st === 'waiting'}<span class="badge">izin</span>{/if}
           <span class="count">{g.lanes.length || ''}</span>
         </button>
-        {#if !isOpen && store.open.length < MAX_PANES && store.open.length > 0}
-          <button class="pin" onclick={() => store.addPane(g.id)} title="Buka di pane sebelah">
-            ⊞
-          </button>
-        {/if}
       </div>
     {:else}
       <div class="empty">satu prompt untuk banyak node</div>
@@ -213,22 +207,12 @@
         {/if}
 
         {#each host.sessions as s (s.id)}
-          {@const isOpen = store.open.includes(s.id)}
-          <div class="row" class:active={isOpen}>
+          <div class="row" class:active={store.active === s.id}>
             <button class="session" onclick={() => store.focus(s.id)}>
               <span class="dot" style:background={dot[s.status]}></span>
               <span class="title">{s.title}</span>
               {#if s.status === 'waiting'}<span class="badge">izin</span>{/if}
             </button>
-            {#if !isOpen && store.open.length < MAX_PANES && store.open.length > 0}
-              <button
-                class="pin"
-                onclick={() => store.addPane(s.id)}
-                title="Buka di pane sebelah"
-              >
-                ⊞
-              </button>
-            {/if}
             {#if s.ownerId === store.me}
               {#if confirmDel === s.id}
                 <button class="del confirm" onclick={() => doDelete(s.id)}>
@@ -537,23 +521,6 @@
     padding: 1px 5px;
     flex: none;
   }
-  .pin {
-    background: none;
-    border: none;
-    color: #6b7280;
-    cursor: pointer;
-    font-size: 16px;
-    padding: 0 9px 0 3px;
-    flex: none;
-    opacity: 0;
-  }
-  .row:hover .pin {
-    opacity: 1;
-  }
-  .pin:hover {
-    color: #4a9eff;
-    transform: scale(1.15);
-  }
   .del {
     background: none;
     border: none;
@@ -657,10 +624,6 @@
     .session {
       padding: 8px 6px 8px 24px;
       font-size: 14px;
-    }
-    .pin {
-      font-size: 18px;
-      padding: 0 12px 0 6px;
     }
     /* Tidak ada hover di layar sentuh: tombol yang cuma muncul saat hover
        artinya tidak pernah muncul sama sekali. */

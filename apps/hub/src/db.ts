@@ -330,6 +330,23 @@ export function touchGeneral(id: string): void {
 
 export const lanesOf = (generalId: string) => q.lanesOf.all(generalId) as SessionRow[]
 
+/**
+ * Hapus general session beserta SELURUH lane + transcript-nya. Permanen.
+ *
+ * Lane adalah baris `sessions` biasa (lihat `ensureLane`), jadi menghapusnya
+ * ikut membawa `messages` lewat ON DELETE CASCADE — sama seperti
+ * `deleteSession`, cuma sekaligus untuk semua node yang pernah ikut general
+ * ini. Return baris lane yang terhapus (lengkap dengan host_id-nya), dipakai
+ * pemanggil untuk memberhentikan proses di tiap agent dan membersihkan
+ * subscription browser.
+ */
+export function deleteGeneral(generalId: string): { lanes: SessionRow[] } {
+  const lanes = lanesOf(generalId)
+  db.prepare('DELETE FROM sessions WHERE general_id = ?').run(generalId)
+  db.prepare('DELETE FROM generals WHERE id = ?').run(generalId)
+  return { lanes }
+}
+
 /** Lane dikunci per (host, cwd): node yang sama di direktori lain = lane lain. */
 export const laneAt = (generalId: string, hostId: string, cwd: string) =>
   (q.laneAt.get(generalId, hostId, cwd) as SessionRow) ?? null

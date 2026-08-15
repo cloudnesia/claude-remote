@@ -101,7 +101,7 @@
   <div class="branding">
     <div class="app-info">
       <div class="app-name">claude-remote</div>
-      <div class="app-version">v0.2</div>
+      <div class="app-version">v0.5.2</div>
     </div>
     <a
       href="https://github.com/yourusername/claude-remote"

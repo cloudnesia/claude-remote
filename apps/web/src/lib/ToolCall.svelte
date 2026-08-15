@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Block } from '@company/protocol'
   import { resultText, toolView } from './tool-view.ts'
+  import ToolIcon from './ToolIcon.svelte'
 
   let {
     block,
@@ -55,6 +56,7 @@
 
 <div class="tool" class:running={!block.result} class:compact>
   <div class="head">
+    <span class="icon"><ToolIcon name={block.name} /></span>
     <span class="name">{block.name}</span>
     {#if view?.target}
       <span class="target" title={view.target}>{view.target}</span>
@@ -163,6 +165,12 @@
     background: #1b1f26;
     font-size: 12px;
     min-width: 0;
+  }
+  .icon {
+    display: inline-flex;
+    align-items: center;
+    color: #4a9eff;
+    flex: none;
   }
   .name {
     font-weight: 600;

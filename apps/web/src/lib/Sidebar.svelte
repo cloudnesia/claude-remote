@@ -30,22 +30,25 @@
     store.unbindHost(hostId)
   }
 
-  /** Session yang menunggu konfirmasi hapus. Dua langkah, sama seperti lepas
-   * node — bedanya yang ini ikut membawa transcript, jadi tidak boleh sekali
-   * klik dari tombol yang duduk persis di sebelah tombol buka pane. */
+  /** Session (atau general) yang menunggu konfirmasi hapus. Dua langkah,
+   * sama seperti lepas node — bedanya yang ini ikut membawa transcript, jadi
+   * tidak boleh sekali klik dari tombol yang duduk persis di sebelah judul. */
   let confirmDel = $state<string | null>(null)
   let delTimer: ReturnType<typeof setTimeout> | null = null
 
-  function askDelete(sessionId: string) {
-    confirmDel = sessionId
+  function askDelete(id: string) {
+    confirmDel = id
     if (delTimer) clearTimeout(delTimer)
     delTimer = setTimeout(() => (confirmDel = null), 5000)
   }
 
-  function doDelete(sessionId: string) {
+  /** General dan session biasa berbagi tombol/konfirmasi yang sama; wire-nya
+   * beda pesan (lihat store.deleteGeneral) makanya dicabang di sini. */
+  function doDelete(id: string) {
     if (delTimer) clearTimeout(delTimer)
     confirmDel = null
-    store.deleteSession(sessionId)
+    if (store.isGeneral(id)) store.deleteGeneral(id)
+    else store.deleteSession(id)
   }
 
   const dot: Record<string, string> = {
@@ -101,7 +104,7 @@
   <div class="branding">
     <div class="app-info">
       <div class="app-name">claude-remote</div>
-      <div class="app-version">v0.6.0</div>
+      <div class="app-version">v0.6.1</div>
     </div>
     <a
       href="https://github.com/yourusername/claude-remote"
@@ -138,6 +141,19 @@
           {#if st === 'waiting'}<span class="badge">izin</span>{/if}
           <span class="count">{g.lanes.length || ''}</span>
         </button>
+        {#if confirmDel === g.id}
+          <button class="del confirm" onclick={() => doDelete(g.id)}>
+            hapus?
+          </button>
+        {:else}
+          <button
+            class="del"
+            onclick={() => askDelete(g.id)}
+            title="Hapus general ini beserta semua lane & transcript-nya"
+          >
+            ×
+          </button>
+        {/if}
       </div>
     {:else}
       <div class="empty">satu prompt untuk banyak node</div>

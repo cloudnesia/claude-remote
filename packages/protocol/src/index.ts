@@ -398,6 +398,13 @@ export type HubToBrowser =
    * transcript yang sudah tidak ada dan prompt ke sana hilang tanpa jejak.
    */
   | { t: 'session_gone'; sessionId: string }
+  /**
+   * General session (dan seluruh lane + transcript-nya) sudah dihapus.
+   * Sama seperti `session_gone`, dikirim ke SEMUA browser: tab general ini
+   * yang terbuka di browser lain harus ikut tutup, bukan cuma di sisi yang
+   * menghapus.
+   */
+  | { t: 'general_gone'; generalId: string }
   | { t: 'browse_result'; hostId: string; result: BrowseResult }
   | { t: 'denied'; action: string; reason: string }
 

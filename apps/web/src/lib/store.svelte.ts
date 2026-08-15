@@ -251,6 +251,19 @@ class Store {
         break
       }
 
+      case 'general_gone': {
+        // Sama seperti session_gone, plus lane-lanenya: general yang sudah
+        // dihapus membawa serta seluruh view lane, kalau tidak generalViews
+        // menyimpan sisa yang tidak akan pernah dibuang GC (dan #prepare bisa
+        // salah mengira general ini masih ada kalau id-nya dipakai lagi).
+        const gv = this.generalViews[m.generalId]
+        for (const l of gv?.lanes ?? []) delete this.views[l.sessionId]
+        delete this.generalViews[m.generalId]
+        this.open = this.open.filter((id) => id !== m.generalId)
+        if (this.active === m.generalId) this.active = this.open[0] ?? null
+        break
+      }
+
       case 'browse_result':
         this.browseBusy = false
         this.browseResult = m.result
@@ -437,6 +450,19 @@ class Store {
    */
   deleteSession(sessionId: string): void {
     this.#send({ t: 'delete_session', sessionId })
+  }
+
+  /**
+   * Hapus general session beserta SELURUH lane & transcript-nya di semua
+   * node. Permanen.
+   *
+   * Wire-nya sama persis dengan `deleteSession` — `delete_session` dengan id
+   * general di `sessionId` — hub yang membedakan lewat id-nya sendiri (lihat
+   * `handleGeneral` di apps/hub/src/index.ts). Method terpisah di sini murni
+   * supaya jelas di titik panggil, bukan protokol baru.
+   */
+  deleteGeneral(generalId: string): void {
+    this.#send({ t: 'delete_session', sessionId: generalId })
   }
 
   /** Cabut pairing sebuah laptop. Tidak bisa dibatalkan — harus pairing ulang. */

@@ -695,6 +695,31 @@ function handleGeneral(conn: BrowserConn, g: db.GeneralRow, m: BrowserToHub): vo
       for (const lane of db.lanesOf(g.id)) sendAgent(lane.host_id, { t: 'interrupt', sessionId: lane.id })
       return
     }
+
+    case 'delete_session': {
+      // Sama seperti delete_session biasa: agent diberi tahu duluan supaya
+      // proses tiap lane berhenti, lepas dari host-nya online atau tidak.
+      for (const lane of db.lanesOf(g.id)) {
+        sendAgent(lane.host_id, { t: 'close_session', sessionId: lane.id })
+        dropSession(lane.id)
+      }
+
+      // Lepas subscription lane general ini di SEMUA browser (bukan cuma
+      // conn ini) — kalau tidak, koneksi live.ts-nya nyangkut dan generalViews
+      // di browser lain tetap merender lane yang barisnya sudah tidak ada.
+      for (const c of browsers) {
+        for (const un of c.generals.get(g.id)?.values() ?? []) un()
+        c.generals.delete(g.id)
+      }
+
+      const { lanes } = db.deleteGeneral(g.id)
+
+      for (const c of browsers) sendBrowser(c, { t: 'general_gone', generalId: g.id })
+
+      console.log(`[hub] general ${g.id.slice(0, 8)} dihapus (${lanes.length} lane ikut terhapus)`)
+      broadcastRoster()
+      return
+    }
   }
 }
 

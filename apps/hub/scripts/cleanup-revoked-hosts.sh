@@ -14,6 +14,14 @@
 #   apps/hub/scripts/cleanup-revoked-hosts.sh              # preview (dry-run)
 #   apps/hub/scripts/cleanup-revoked-hosts.sh --apply       # eksekusi beneran
 #   DB_PATH=/path/lain/hub.db ...  --apply                  # DB lain
+#   NODE_BIN=/path/ke/node ...     --apply                  # Node spesifik
+#
+# Di instalasi install-server.sh, Node sering dipasang privat di
+# $PREFIX/node (bukan lewat paket sistem), dan `sudo -u <svc-user>` mereset
+# PATH (secure_path) sehingga 'node' bisa "not found" walau hub-nya sendiri
+# jalan normal (systemd memanggilnya lewat path lengkap). Skrip ini mencoba
+# 'node' di PATH dulu, lalu jatuh ke $PREFIX/node/bin/node sebagai sibling
+# dari root app ini; override manual lewat NODE_BIN= kalau keduanya meleset.
 #
 # Hub sebaiknya TIDAK sedang jalan saat --apply dipakai (SQLite WAL cukup
 # toleran untuk write bersamaan, tapi lebih aman kalau tidak ada proses lain
@@ -23,6 +31,34 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../../.." # -> root repo
 
+resolve_node() {
+  if [ -n "${NODE_BIN:-}" ]; then
+    [ -x "$NODE_BIN" ] || { echo "NODE_BIN=$NODE_BIN bukan executable" >&2; exit 1; }
+    return
+  fi
+  if command -v node >/dev/null 2>&1; then
+    NODE_BIN="$(command -v node)"
+    return
+  fi
+  # Layout install-server.sh: $PREFIX/app (root repo, cwd kita sekarang) dan
+  # $PREFIX/node bersebelahan.
+  local candidate="$PWD/../node/bin/node"
+  if [ -x "$candidate" ]; then
+    NODE_BIN="$candidate"
+    return
+  fi
+  cat >&2 <<EOF
+Tidak menemukan 'node' — tidak ada di PATH, dan tidak ada di $candidate.
+('sudo -u' mereset PATH, jadi Node yang dipasang privat oleh install-server.sh
+bisa jadi tidak kelihatan meski hub-nya sendiri jalan normal.)
+
+Set lokasinya manual, mis.:
+  NODE_BIN=/opt/claude-remote/node/bin/node $0 --apply
+EOF
+  exit 1
+}
+resolve_node
+
 DB_PATH="${DB_PATH:-./data/hub.db}"
 APPLY=0
 
@@ -30,7 +66,7 @@ for arg in "$@"; do
   case "$arg" in
     --apply) APPLY=1 ;;
     --help|-h)
-      sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -68,7 +104,7 @@ EOF
   fi
 fi
 
-DB_PATH="$DB_PATH" APPLY="$APPLY" node --input-type=module -e "
+DB_PATH="$DB_PATH" APPLY="$APPLY" "$NODE_BIN" --input-type=module -e "
 import { DatabaseSync } from 'node:sqlite'
 
 const dbPath = process.env.DB_PATH

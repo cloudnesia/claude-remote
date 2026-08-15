@@ -45,6 +45,29 @@ if [ ! -f "$DB_PATH" ]; then
   exit 1
 fi
 
+if [ "$APPLY" = 1 ]; then
+  db_dir="$(dirname "$DB_PATH")"
+  # SQLite butuh nulis ke DIREKTORI-nya juga (file -wal/-shm/-journal di
+  # sebelah hub.db), jadi file-nya writable saja tidak cukup. Ini penyebab
+  # paling umum "attempt to write a readonly database" di deployment
+  # install-server.sh: $STATE (/var/lib/claude-remote) di-chown ke user
+  # service (claude-remote), bukan ke user yang menjalankan skrip ini.
+  if [ ! -w "$DB_PATH" ] || [ ! -w "$db_dir" ]; then
+    owner="$(stat -c '%U' "$DB_PATH" 2>/dev/null || stat -f '%Su' "$DB_PATH" 2>/dev/null || echo '?')"
+    cat >&2 <<EOF
+Tidak punya izin tulis ke $DB_PATH atau direktorinya ($db_dir).
+Pemiliknya: $owner — jalankan sebagai user itu, mis.:
+
+  sudo -u $owner DB_PATH=$DB_PATH $0 --apply
+
+(SQLite perlu menulis file -wal/-shm di direktori yang sama, jadi file
+db-nya writable saja tidak cukup — direktorinya juga harus writable oleh
+user yang menjalankan skrip ini.)
+EOF
+    exit 1
+  fi
+fi
+
 DB_PATH="$DB_PATH" APPLY="$APPLY" node --input-type=module -e "
 import { DatabaseSync } from 'node:sqlite'
 
@@ -92,6 +115,13 @@ try {
   db.exec('COMMIT')
 } catch (err) {
   db.exec('ROLLBACK')
+  if (err && err.errcode === 8) {
+    console.error(
+      \`\nDB/direktorinya masih readonly buat user ini walau cek awal lolos \` +
+        \`(kemungkinan filesystem read-only atau atribut khusus, mis. chattr +i). \` +
+        \`Cek: mount | grep \$(dirname \${JSON.stringify(dbPath)}), lsattr \${JSON.stringify(dbPath)}\`,
+    )
+  }
   throw err
 }
 

@@ -1,5 +1,4 @@
 import { DatabaseSync } from 'node:sqlite'
-import { randomBytes } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { GeneralMeta, LaneMeta, Message, SessionMeta, UserMeta, Visibility } from '@company/protocol'
@@ -226,32 +225,19 @@ export function setModel(sessionId: string, model: string | null): void {
 }
 
 /**
- * Cabut pairing sebuah laptop.
+ * Cabut pairing sebuah laptop — permanen, dan tuntas.
  *
- * Token juga dirotasi, bukan cuma ditandai: kalau nilai lamanya sempat bocor
- * (itu justru alasan orang menekan tombol ini), menandai saja menyisakan
- * rahasia yang masih bisa dicocokkan seandainya flag pernah terlewat di
- * suatu query.
- *
- * Host yang tidak punya session dihapus sekalian supaya daftar tetap bersih.
- * Yang punya session DIPERTAHANKAN — menghapusnya akan ikut membawa seluruh
- * transcript, dan mencabut kredensial bukan alasan untuk menghancurkan riwayat.
+ * "Lepas" berarti benar-benar hilang: node-nya dan SELURUH session +
+ * transcript miliknya dihapus dari DB (baris `messages` ikut terbawa lewat
+ * ON DELETE CASCADE di kolom `session_id`), lalu row host-nya sendiri
+ * dibuang sekalian supaya tidak ada nama mati yang nyangkut di sidebar.
+ * Token tidak perlu dirotasi lagi — barisnya sudah tidak ada.
  */
-export function revokeHost(hostId: string): { deleted: boolean } {
-  const n = (
-    db.prepare('SELECT COUNT(*) c FROM sessions WHERE host_id = ?').get(hostId) as { c: number }
-  ).c
-
-  if (n === 0) {
-    db.prepare('DELETE FROM hosts WHERE id = ?').run(hostId)
-    return { deleted: true }
-  }
-
-  db.prepare('UPDATE hosts SET revoked = 1, token = ? WHERE id = ?').run(
-    `revoked_${randomBytes(16).toString('hex')}`,
-    hostId,
-  )
-  return { deleted: false }
+export function revokeHost(hostId: string): { deletedSessionIds: string[] } {
+  const deletedSessionIds = sessionIdsOfHost(hostId)
+  db.prepare('DELETE FROM sessions WHERE host_id = ?').run(hostId)
+  db.prepare('DELETE FROM hosts WHERE id = ?').run(hostId)
+  return { deletedSessionIds }
 }
 
 /**

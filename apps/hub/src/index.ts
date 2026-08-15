@@ -413,15 +413,34 @@ function onBrowser(ws: WebSocket, user: db.UserRow): void {
       // menentukan adalah token yang sudah mati di sisi hub.
       sendAgent(host.id, { t: 'revoked', reason: 'pairing dicabut dari web' })
 
-      const { deleted } = db.revokeHost(host.id)
+      // Tutup semua session milik host ini di sisi agent SEBELUM barisnya
+      // dihapus dari DB — sama seperti alur delete_session satuan, cuma
+      // sekarang untuk seluruh sesi node ini sekaligus.
+      const sessionIds = db.sessionIdsOfHost(host.id)
+      for (const sid of sessionIds) {
+        sendAgent(host.id, { t: 'close_session', sessionId: sid })
+        dropSession(sid)
+      }
+
       const conn2 = agents.get(host.id)
       if (conn2) {
         agents.delete(host.id)
         setTimeout(() => conn2.ws.close(CLOSE.FORBIDDEN, 'revoked'), 200)
-        markHostOffline(db.sessionIdsOfHost(host.id))
-        broadcastHostStatus(host.id, false)
       }
-      console.log(`[hub] host ${host.name} dicabut${deleted ? ' dan dihapus' : ''}`)
+
+      db.revokeHost(host.id)
+
+      for (const c of browsers) {
+        for (const sid of sessionIds) {
+          c.unsubs.get(sid)?.()
+          c.unsubs.delete(sid)
+          sendBrowser(c, { t: 'session_gone', sessionId: sid })
+        }
+      }
+
+      console.log(
+        `[hub] host ${host.name} dilepas dan dihapus (${sessionIds.length} session ikut terhapus)`,
+      )
       broadcastRoster()
       return
     }

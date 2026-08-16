@@ -104,6 +104,15 @@
 {/if}
 
 <style>
+  :global(html, body) {
+    height: 100%;
+    /* Shell aplikasi selalu pas satu viewport — tiap panel (transcript,
+       sidebar, dst) yang scroll sendiri lewat overflow-y internalnya
+       masing-masing. Tanpa ini, komponen yang salah hitung tinggi (lupa
+       min-height: 0 di rantai flex) bikin SELURUH halaman yang scroll,
+       menyeret header/tab bar/sidebar ikut hilang dari layar. */
+    overflow: hidden;
+  }
   :global(body) {
     margin: 0;
     background: #0f1115;

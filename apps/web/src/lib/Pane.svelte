@@ -181,6 +181,13 @@
   section {
     flex: 1 1 0;
     min-width: 0;
+    /* Wajib: parent (`main` di +page.svelte) sekarang flex-direction column
+       sejak tab bar ada. Tanpa ini, default `min-height: auto` bikin section
+       tidak pernah menyusut di bawah tinggi kontennya — transcript panjang
+       mendorong seluruh halaman melebar ke bawah alih-alih Transcript-nya
+       sendiri yang scroll (overflow-y: auto di Transcript.svelte jadi
+       percuma karena tidak pernah dapat tinggi yang dibatasi). */
+    min-height: 0;
     display: flex;
     flex-direction: column;
     border-right: 1px solid #23272f;

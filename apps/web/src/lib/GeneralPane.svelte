@@ -187,6 +187,10 @@
   section {
     flex: 1 1 0;
     min-width: 0;
+    /* Sama seperti Pane.svelte: parent sekarang column-flex (tab bar), jadi
+       tanpa ini section tidak pernah menyusut di bawah tinggi kontennya dan
+       halaman ikut memanjang alih-alih lane di dalamnya yang scroll. */
+    min-height: 0;
     display: flex;
     flex-direction: column;
     border-right: 1px solid #23272f;

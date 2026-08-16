@@ -125,6 +125,15 @@
   .app {
     display: flex;
     height: 100vh;
+    /* Browser mobile (terutama Safari iOS) menghitung 100vh dari viewport
+       TERBESAR yang mungkin — seolah address bar sudah disembunyikan —
+       bukan tinggi yang benar-benar terlihat saat itu. `.app` jadi lebih
+       tinggi dari layar sungguhan, dan gabungan itu dengan `overflow: hidden`
+       di body (lihat komentar di atas) membuat bagian bawah (sidebar/chat)
+       terpotong tak terlihat, tanpa cara scroll ke sana. `100dvh` mengikuti
+       tinggi viewport yang benar-benar tampak; browser yang belum kenal unit
+       ini otomatis abaikan baris ini dan pakai 100vh di atasnya. */
+    height: 100dvh;
   }
   main {
     flex: 1;
@@ -150,6 +159,7 @@
     display: grid;
     place-items: center;
     height: 100vh;
+    height: 100dvh;
   }
   .login form {
     display: flex;
@@ -215,9 +225,16 @@
     .app {
       flex-direction: column;
     }
-    main {
-      height: calc(100vh - 60px);
-    }
+    /* SEBELUMNYA main dipaksa `height: calc(100vh - 60px)` — angka 60px itu
+       tidak pernah cocok dengan tinggi sidebar mobile yang sebenarnya
+       (aside di bawah di-cap `max-height: 200px`, lihat Sidebar.svelte).
+       Selisihnya bikin main "meluber" di luar viewport; dulu masih bisa
+       di-scroll-page untuk melihatnya, tapi sejak body dikunci
+       `overflow: hidden` (lihat komentar di atas), bagian yang meluber itu
+       jadi benar-benar tidak terlihat DAN tidak bisa dicapai sama sekali —
+       persis laporan "sidebar hilang, chat area juga tidak kelihatan".
+       Biarkan flexbox yang menghitung (flex: 1; min-height: 0 di aturan
+       dasar main) — sisa tinggi setelah aside, berapa pun tingginya. */
     .blank {
       font-size: 13px;
       padding: 0 20px;

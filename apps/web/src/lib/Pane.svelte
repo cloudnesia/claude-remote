@@ -83,59 +83,12 @@
     <div class="blank">session tidak ditemukan</div>
   {:else}
     <header>
-      <div class="id">
-        <div class="title">{meta.title}</div>
-        <div class="sub">{meta.cwd}</div>
-      </div>
-      <div class="right">
-        <span
-          class="status"
-          class:warn={meta.status === 'waiting' || meta.status === 'ratelimited'}
-          class:err={meta.status === 'error'}
-        >
-          {asking && meta.status === 'waiting'
-            ? 'menunggu jawaban'
-            : (statusLabel[meta.status] ?? meta.status)}
-        </span>
-        {#if view?.canPrompt && models.length}
-          <select
-            class="model"
-            value={view.model ?? ''}
-            onchange={(e) => store.setModel(sessionId, e.currentTarget.value || null)}
-            title="Model untuk session ini"
-          >
-            {#each models as m (m.value)}
-              <option value={m.value === 'default' ? '' : m.value}>{m.displayName}</option>
-            {/each}
-          </select>
-        {:else if meta.model}
-          <span class="model ro">{meta.model}</span>
-        {/if}
-        {#if view?.canPrompt}
-          <button
-            class="auto"
-            class:on={view.auto}
-            onclick={() => store.setAuto(sessionId, !view.auto)}
-            title={view.auto
-              ? 'Auto mode AKTIF — tool jalan tanpa minta izin. Klik untuk matikan.'
-              : 'Auto mode mati — tiap tool minta izin dulu. Klik untuk aktifkan.'}
-          >
-            auto {view.auto ? 'on' : 'off'}
-          </button>
-        {:else if meta.auto}
-          <span class="auto on ro">auto on</span>
-        {/if}
-        {#if meta.status === 'thinking' && view?.canPrompt}
-          <button class="icon" onclick={() => store.interrupt(sessionId)} title="Hentikan">
-            ■
-          </button>
-        {/if}
-        {#if closable}
-          <button class="icon" onclick={() => store.closePane(sessionId)} title="Tutup tab">
-            ✕
-          </button>
-        {/if}
-      </div>
+      <div class="title">{meta.title}</div>
+      {#if closable}
+        <button class="icon" onclick={() => store.closePane(sessionId)} title="Tutup tab">
+          ✕
+        </button>
+      {/if}
     </header>
 
     {#if view?.pending && asking && view.canPrompt}
@@ -193,58 +146,127 @@
       <div class="blank">memuat…</div>
     {/if}
 
-    <AttachChips attachments={pending} onremove={(id) => (pending = pending.filter((a) => a.id !== id))} />
+    <!--
+      Model, auto-mode, status, dan tombol stop dulunya di header — sekarang
+      satu unit dengan composer, dan TOGGLE dengan tampilan "berpikir": begitu
+      Claude mulai menjawab, seluruh baris input (model/auto/status/textarea)
+      diganti indikator tengah + tombol stop, bukan disembunyikan sebagian.
+      Trade-off yang disadari: prompt susulan tidak bisa diantre sambil giliran
+      sebelumnya masih jalan (dulu bisa, lewat textarea yang tetap aktif).
+    -->
+    {#if meta.status === 'thinking'}
+      <div class="thinking-bar">
+        <span class="thinking-text">
+          Berpikir
+          <span class="dots"><i></i><i></i><i></i></span>
+        </span>
+        {#if view?.canPrompt}
+          <button type="button" class="stop" onclick={() => store.interrupt(sessionId)}>
+            ■ Stop
+          </button>
+        {/if}
+      </div>
+    {:else}
+      <div class="toolbar">
+        {#if view?.canPrompt && models.length}
+          <select
+            class="model"
+            value={view.model ?? ''}
+            onchange={(e) => store.setModel(sessionId, e.currentTarget.value || null)}
+            title="Model untuk session ini"
+          >
+            {#each models as m (m.value)}
+              <option value={m.value === 'default' ? '' : m.value}>{m.displayName}</option>
+            {/each}
+          </select>
+        {:else if meta.model}
+          <span class="model ro">{meta.model}</span>
+        {/if}
+        {#if view?.canPrompt}
+          <button
+            class="auto"
+            class:on={view.auto}
+            onclick={() => store.setAuto(sessionId, !view.auto)}
+            title={view.auto
+              ? 'Auto mode AKTIF — tool jalan tanpa minta izin. Klik untuk matikan.'
+              : 'Auto mode mati — tiap tool minta izin dulu. Klik untuk aktifkan.'}
+          >
+            auto {view.auto ? 'on' : 'off'}
+          </button>
+        {:else if meta.auto}
+          <span class="auto on ro">auto on</span>
+        {/if}
+        {#if meta.status !== 'idle'}
+          <span
+            class="status"
+            class:warn={meta.status === 'waiting' || meta.status === 'ratelimited'}
+            class:err={meta.status === 'error'}
+          >
+            {asking && meta.status === 'waiting'
+              ? 'menunggu jawaban'
+              : (statusLabel[meta.status] ?? meta.status)}
+          </span>
+        {/if}
+      </div>
 
-    <form
-      class="composer"
-      class:dragover={dragOver}
-      onsubmit={submit}
-      ondragover={(e) => {
-        e.preventDefault()
-        dragOver = true
-      }}
-      ondragleave={() => (dragOver = false)}
-      ondrop={onDrop}
-    >
-      <input
-        bind:this={fileInput}
-        type="file"
-        accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
-        multiple
-        hidden
-        onchange={onPick}
-      />
-      <button
-        type="button"
-        class="clip"
-        disabled={!view?.canPrompt}
-        onclick={() => fileInput?.click()}
-        title="Lampirkan foto atau PDF"
-      >
-        📎
-      </button>
-      <textarea
-        value={view?.draft ?? ''}
-        oninput={(e) => {
-          if (view) view.draft = e.currentTarget.value
+      <AttachChips attachments={pending} onremove={(id) => (pending = pending.filter((a) => a.id !== id))} />
+
+      <form
+        class="composer"
+        class:dragover={dragOver}
+        onsubmit={submit}
+        ondragover={(e) => {
+          e.preventDefault()
+          dragOver = true
         }}
-        onkeydown={onKeydown}
-        onpaste={onPaste}
-        rows="2"
-        disabled={!view?.canPrompt}
-        placeholder={view?.canPrompt
-          ? 'Tulis prompt… (tempel/drag foto atau PDF juga bisa)'
-          : meta.status === 'offline'
-            ? 'Host offline — hanya bisa dibaca'
-            : 'Hanya owner yang bisa mengirim prompt'}
-      ></textarea>
-      <button
-        type="submit"
-        disabled={!view?.canPrompt || (!view?.draft.trim() && !pending.length)}
+        ondragleave={() => (dragOver = false)}
+        ondrop={onDrop}
       >
-        Kirim
-      </button>
-    </form>
+        <input
+          bind:this={fileInput}
+          type="file"
+          accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+          multiple
+          hidden
+          onchange={onPick}
+        />
+        <div class="input-shell">
+          <button
+            type="button"
+            class="icon-btn clip"
+            disabled={!view?.canPrompt}
+            onclick={() => fileInput?.click()}
+            title="Lampirkan foto atau PDF"
+          >
+            📎
+          </button>
+          <textarea
+            class="composer-input"
+            value={view?.draft ?? ''}
+            oninput={(e) => {
+              if (view) view.draft = e.currentTarget.value
+            }}
+            onkeydown={onKeydown}
+            onpaste={onPaste}
+            rows="2"
+            disabled={!view?.canPrompt}
+            placeholder={view?.canPrompt
+              ? 'Tulis prompt… (tempel/drag foto atau PDF juga bisa)'
+              : meta.status === 'offline'
+                ? 'Host offline — hanya bisa dibaca'
+                : 'Hanya owner yang bisa mengirim prompt'}
+          ></textarea>
+          <button
+            type="submit"
+            class="icon-btn send"
+            disabled={!view?.canPrompt || (!view?.draft.trim() && !pending.length)}
+            title="Kirim"
+          >
+            ➤
+          </button>
+        </div>
+      </form>
+    {/if}
   {/if}
 </section>
 
@@ -274,29 +296,13 @@
     padding: 11px 16px;
     border-bottom: 1px solid #23272f;
   }
-  .id {
-    min-width: 0;
-  }
   .title {
+    min-width: 0;
     font-weight: 600;
     font-size: 14px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .sub {
-    font-size: 11px;
-    color: #6b7280;
-    font-family: ui-monospace, monospace;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .right {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: none;
   }
   .status {
     font-size: 11px;
@@ -365,6 +371,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    flex: none;
   }
   .icon:hover {
     color: #fff;
@@ -437,115 +444,193 @@
     color: #8a7749;
     flex: none;
   }
+
+  /* ---------------------------------------------------------------- toolbar */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px 0;
+  }
+
+  /* ------------------------------------------------------------ composer */
   .composer {
     display: flex;
-    align-items: flex-end;
-    gap: 8px;
-    padding: 12px 16px 14px;
-    border-top: 1px solid #23272f;
+    padding: 8px 16px 14px;
+    border-top: 1px solid transparent;
   }
   .composer.dragover {
     background: rgba(74, 158, 255, 0.06);
     outline: 1.5px dashed #4a9eff;
     outline-offset: -4px;
   }
-  .clip {
-    flex: none;
-    background: none;
-    border: 1px solid #3a3f4a;
-    color: #9aa3b2;
-    border-radius: 7px;
-    width: 36px;
-    height: 36px;
-    font-size: 15px;
-    cursor: pointer;
-    padding: 0;
-  }
-  .clip:hover:not(:disabled) {
-    color: #4a9eff;
-    border-color: #4a9eff;
-  }
-  .clip:disabled {
-    color: #4b515c;
-    cursor: default;
-  }
-  textarea {
+  .input-shell {
+    position: relative;
     flex: 1;
     min-width: 0;
+  }
+  .composer-input {
+    width: 100%;
+    box-sizing: border-box;
     resize: none;
     background: #14171c;
     border: 1px solid #23272f;
-    border-radius: 7px;
+    border-radius: 10px;
     color: inherit;
     font: inherit;
     font-size: 13px;
-    padding: 8px 11px;
+    padding: 10px 46px;
   }
-  textarea:focus {
+  .composer-input:focus {
     outline: none;
     border-color: #3a4759;
   }
-  textarea:disabled {
+  .composer-input:disabled {
     color: #6b7280;
   }
-  .composer button {
-    background: #2563eb;
+  /* Ikon dikunci di dalam kotak input (bottom-left/bottom-right) — tidak lagi
+     ikut flex row bersama textarea, jadi posisinya tidak goyang mengikuti
+     tinggi textarea atau elemen di sebelahnya. */
+  .icon-btn {
+    position: absolute;
+    bottom: 7px;
+    width: 30px;
+    height: 30px;
     border: none;
-    color: #fff;
     border-radius: 7px;
-    padding: 0 16px;
-    font: inherit;
-    font-size: 13px;
+    background: none;
+    color: #9aa3b2;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
-    flex: none;
   }
-  .composer button:disabled {
+  .icon-btn.clip {
+    left: 7px;
+  }
+  .icon-btn.clip:hover:not(:disabled) {
+    color: #4a9eff;
+  }
+  .icon-btn.clip:disabled {
+    color: #4b515c;
+    cursor: default;
+  }
+  .icon-btn.send {
+    right: 7px;
+    background: #2563eb;
+    color: #fff;
+    font-size: 13px;
+  }
+  .icon-btn.send:hover:not(:disabled) {
+    background: #1d4ed8;
+  }
+  .icon-btn.send:disabled {
     background: #2b2f38;
     color: #6b7280;
     cursor: default;
+  }
+
+  /* ------------------------------------------------------------ thinking */
+  .thinking-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 18px 16px;
+    border-top: 1px solid #23272f;
+  }
+  .thinking-text {
+    display: flex;
+    align-items: center;
+    color: #9aa3b2;
+    font-size: 13px;
+  }
+  .dots {
+    display: inline-flex;
+    gap: 3px;
+    margin-left: 7px;
+  }
+  .dots i {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.3;
+    animation: dotpulse 1.2s infinite;
+  }
+  .dots i:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .dots i:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+  @keyframes dotpulse {
+    0%,
+    60%,
+    100% {
+      opacity: 0.3;
+      transform: scale(0.85);
+    }
+    30% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  .stop {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #2b1616;
+    border: 1px solid #6b2c26;
+    color: #ffb3ae;
+    border-radius: 7px;
+    padding: 7px 14px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .stop:hover {
+    background: #3a1c19;
+    border-color: #e5534b;
   }
 
   /* Mobile responsive */
   @media (max-width: 768px) {
     header {
       padding: 8px 12px;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    .id {
-      flex: 1 1 100%;
     }
     .title {
       font-size: 15px;
-    }
-    .sub {
-      font-size: 10px;
-    }
-    .right {
-      gap: 6px;
-      flex-wrap: wrap;
     }
     .icon {
       width: 32px;
       height: 32px;
       font-size: 15px;
     }
+    .toolbar {
+      padding: 10px 12px 0;
+      flex-wrap: wrap;
+    }
     .composer {
-      padding: 10px 12px;
+      padding: 8px 12px 12px;
     }
-    textarea {
+    .composer-input {
       font-size: 14px;
-      padding: 10px 12px;
+      padding: 11px 48px;
     }
-    .composer button {
-      font-size: 14px;
-      padding: 0 18px;
+    .icon-btn {
+      width: 34px;
+      height: 34px;
+      font-size: 16px;
     }
-    .clip {
-      width: 40px;
-      height: 40px;
-      padding: 0;
-      font-size: 17px;
+    .icon-btn.clip {
+      left: 6px;
+    }
+    .icon-btn.send {
+      right: 6px;
     }
     .model {
       font-size: 12px;
@@ -557,6 +642,10 @@
     }
     .status {
       font-size: 12px;
+    }
+    .thinking-bar {
+      padding: 16px 12px;
+      gap: 12px;
     }
     .approval {
       margin: 8px 12px 0;

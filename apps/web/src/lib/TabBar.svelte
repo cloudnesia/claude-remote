@@ -64,8 +64,13 @@
   .tab {
     display: flex;
     align-items: stretch;
-    flex: none;
-    max-width: 220px;
+    /* Dinamis, bukan lebar tetap: tab tumbuh mengisi ruang kosong kalau cuma
+       sedikit yang terbuka, menyusut sampai min-width kalau banyak — baru
+       setelah itu overflow-x pada .tabbar yang ambil alih lewat scroll,
+       persis tab browser. */
+    flex: 1 1 160px;
+    min-width: 120px;
+    max-width: 260px;
     border-right: 1px solid #1b1f26;
   }
   .tab.active {
@@ -129,6 +134,8 @@
 
   @media (max-width: 768px) {
     .tab {
+      flex-basis: 120px;
+      min-width: 96px;
       max-width: 160px;
     }
   }

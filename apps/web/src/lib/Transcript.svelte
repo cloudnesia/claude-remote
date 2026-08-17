@@ -65,6 +65,11 @@
             <p class="errblock">{b.text}</p>
           {:else if b.kind === 'tool'}
             <ToolCall block={b} />
+          {:else if b.kind === 'attachment'}
+            <div class="attachment" title={b.mime}>
+              <span class="ico">{b.mime.startsWith('image/') ? '🖼' : '📎'}</span>
+              {b.name}
+            </div>
           {/if}
         {/each}
         {#if m === live && m.blocks.length === 0}
@@ -132,6 +137,21 @@
   }
   .pulse {
     color: #6b7280;
+  }
+  .attachment {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 6px 8px 0;
+    padding: 4px 9px;
+    background: #1f242c;
+    border: 1px solid #2b303a;
+    border-radius: 999px;
+    font-size: 12px;
+    color: #9aa3b2;
+  }
+  .attachment .ico {
+    font-size: 12px;
   }
   .errblock {
     margin: 0 0 8px;

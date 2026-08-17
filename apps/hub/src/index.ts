@@ -5,6 +5,7 @@ import {
   CLOSE,
   PROTOCOL_VERSION,
   safeParse,
+  validateAttachments,
   type AgentToHub,
   type BrowserToHub,
   type HubToAgent,
@@ -588,9 +589,21 @@ function onBrowser(ws: WebSocket, user: db.UserRow): void {
     }
 
     switch (m.t) {
-      case 'prompt':
-        sendAgent(s.host_id, { t: 'prompt', sessionId: s.id, text: m.text })
+      case 'prompt': {
+        // Ditegakkan lagi di sini, bukan cuma di web: batas ukuran/tipe/jumlah
+        // adalah kontrak wire, dan klien yang curang (atau web versi lama yang
+        // belum tahu batas ini) tidak boleh bisa menyelundupkan lampiran
+        // raksasa langsung ke proses agent.
+        const reason = validateAttachments(m.attachments)
+        if (reason) return sendBrowser(conn, { t: 'denied', action: 'prompt', reason })
+        sendAgent(s.host_id, {
+          t: 'prompt',
+          sessionId: s.id,
+          text: m.text,
+          attachments: m.attachments,
+        })
         break
+      }
       case 'interrupt':
         sendAgent(s.host_id, { t: 'interrupt', sessionId: s.id })
         break
@@ -656,6 +669,9 @@ function handleGeneral(conn: BrowserConn, g: db.GeneralRow, m: BrowserToHub): vo
     }
 
     case 'prompt': {
+      const attachReason = validateAttachments(m.attachments)
+      if (attachReason) return sendBrowser(conn, { t: 'denied', action: 'prompt', reason: attachReason })
+
       const r = route(m.text, db.hostsOf(g.owner_id), isOnline, (hostId) =>
         db.lastLaneCwd(g.id, hostId),
       )
@@ -668,13 +684,23 @@ function handleGeneral(conn: BrowserConn, g: db.GeneralRow, m: BrowserToHub): vo
             : 'sebut dulu node-nya, misalnya @laptop atau @all'
         return sendBrowser(conn, { t: 'denied', action: 'prompt', reason: why })
       }
-      if (!r.text) {
+      // Teks boleh kosong kalau ada lampiran — "@node" + foto tanpa kalimat
+      // lain itu valid, sama seperti session biasa. Tanpa lampiran, teks
+      // kosong (cuma sebutan doang) tidak ada yang bisa dikerjakan Claude.
+      if (!r.text && !m.attachments?.length) {
         return sendBrowser(conn, { t: 'denied', action: 'prompt', reason: 'prompt kosong' })
       }
 
       for (const { host, cwd } of r.targets) {
         const lane = ensureLane(g, host, cwd)
-        if (lane) sendAgent(host.id, { t: 'prompt', sessionId: lane.id, text: r.text })
+        if (lane) {
+          sendAgent(host.id, {
+            t: 'prompt',
+            sessionId: lane.id,
+            text: r.text,
+            attachments: m.attachments,
+          })
+        }
       }
       db.touchGeneral(g.id)
 

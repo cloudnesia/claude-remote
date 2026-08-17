@@ -45,7 +45,7 @@ type Frame = {
 
 | `ev.t`            | field                              | arti |
 |-------------------|------------------------------------|------|
-| `user_msg`        | `text`                             | prompt user, di-echo balik oleh agent |
+| `user_msg`        | `text`, `attachments?: AttachmentMeta[]` | prompt user, di-echo balik oleh agent |
 | `turn_start`      | —                                  | giliran assistant dimulai |
 | `text_delta`      | `blk`, `text`                      | potongan teks jawaban |
 | `thinking_delta`  | `blk`, `text`                      | potongan extended thinking |
@@ -68,6 +68,28 @@ type Frame = {
   Tampilkan mentah sebagai indikator progres; parse hanya saat `tool_done`.
 - `approval_req` membekukan session sampai ada `approval_resp`. UI wajib
   menonjolkannya — kalau tidak, session menggantung tanpa penjelasan.
+
+### Lampiran: byte lewat sekali, jejaknya yang menetap
+
+Prompt boleh membawa `attachments: Attachment[]` — gambar (jpeg/png/gif/webp)
+atau PDF, base64, native didukung API Claude sebagai vision/document content
+block (lihat `attachmentBlock()` di `apps/agent/src/session.ts`). Batas tipe/
+ukuran/jumlah ada di `validateAttachments()` (`packages/protocol`), ditegakkan
+DUA kali — browser (supaya user tahu sebelum submit) dan hub (klien nakal
+atau web versi lama tidak boleh bisa menyelundupkan lampiran raksasa/tipe
+aneh ke agent).
+
+```ts
+type Attachment = { name: string; mime: string; dataBase64: string }
+type AttachmentMeta = { name: string; mime: string }  // tanpa byte
+```
+
+Byte-nya HANYA lewat sekali: browser → hub → agent → Claude, lalu berhenti.
+Yang disimpan permanen di DB hub (lewat `Ev.user_msg.attachments`, block
+`{ kind: 'attachment', name, mime }` di `Message`) cuma nama & tipe —
+`AttachmentMeta`, bukan `Attachment`. Reload session lama tetap menunjukkan
+"pernah ada lampiran", tapi isinya sendiri sudah tidak tersimpan di mana pun
+— pertukaran sengaja supaya DB tidak membengkak oleh gambar yang menumpuk.
 
 ### `AskUserQuestion`: approval yang butuh isi, bukan cuma izin
 
@@ -103,7 +125,7 @@ bikin sistem jalan dari wifi kafe / di belakang NAT.
 | `set_auto`       | `sessionId`, `auto`                     | auto-approve semua tool |
 | `set_model`      | `sessionId`, `model`                    | ganti model; `null` = default |
 | `browse`         | `reqId`, `path`                         | daftar subdirektori di host |
-| `prompt`         | `sessionId`, `text`                     | suntik prompt (owner sudah divalidasi hub) |
+| `prompt`         | `sessionId`, `text`, `attachments?: Attachment[]` | suntik prompt (owner sudah divalidasi hub) |
 | `interrupt`      | `sessionId`                             | setara ESC |
 | `approval_resp`  | `sessionId`, `reqId`, `decision`, `answers?` | `allow` \| `deny` \| `allow_always`; `answers` khusus `AskUserQuestion` |
 | `close_session`  | `sessionId`                             | matikan proses, session jadi arsip |
@@ -169,7 +191,7 @@ replay setelah reconnect.
 |---------------|------------------------------------|---------|
 | `subscribe`   | `sessionId`                        | siapa pun yang punya akses baca |
 | `unsubscribe` | `sessionId`                        | |
-| `prompt`      | `sessionId`, `text`                | **owner saja** — divalidasi di hub |
+| `prompt`      | `sessionId`, `text`, `attachments?: Attachment[]` | **owner saja** — divalidasi di hub |
 | `interrupt`   | `sessionId`                        | owner saja |
 | `approve`     | `sessionId`, `reqId`, `decision`, `answers?` | owner saja; `answers` khusus `AskUserQuestion` |
 | `new_session` | `hostId`, `cwd`, `title`           | owner host saja, host wajib online |

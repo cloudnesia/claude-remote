@@ -8,12 +8,19 @@
     placeholder,
     oninput,
     onsubmit,
+    onpaste,
+    hasAttachments = false,
   }: {
     value: string
     disabled: boolean
     placeholder: string
     oninput: (v: string) => void
     onsubmit: () => void
+    /** Lampiran (paste gambar/PDF) — opsional, diteruskan mentah dari textarea. */
+    onpaste?: (e: ClipboardEvent) => void
+    /** Ada lampiran tertunda: tombol Kirim tetap aktif walau teks kosong —
+     * "@node" + foto tanpa kalimat lain itu valid. */
+    hasAttachments?: boolean
   } = $props()
 
   type Suggestion = { slug: string; label: string; note: string; online: boolean }
@@ -142,19 +149,25 @@
     rows="2"
     oninput={onInputEvent}
     onkeydown={onKeydown}
+    onpaste={onpaste}
     onclick={(e) => refresh(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)}
     onblur={() => (anchor = null)}
   ></textarea>
-  <button type="button" onclick={onsubmit} disabled={disabled || !value.trim()}>Kirim</button>
+  <button type="button" onclick={onsubmit} disabled={disabled || (!value.trim() && !hasAttachments)}>
+    Kirim
+  </button>
 </div>
 
 <style>
   .composer {
+    /* Tidak ada padding/border sendiri — dibungkus `.attach-row` di
+       GeneralPane.svelte, itu yang menggambar bilah composer-nya. Satu-satunya
+       pemakai komponen ini, jadi aman digeser tanpa merusak pemakai lain. */
     position: relative;
     display: flex;
+    flex: 1;
+    min-width: 0;
     gap: 8px;
-    padding: 12px 16px 14px;
-    border-top: 1px solid #23272f;
   }
   textarea {
     flex: 1;
@@ -193,8 +206,8 @@
   }
   .menu {
     position: absolute;
-    left: 16px;
-    right: 16px;
+    left: 0;
+    right: 0;
     bottom: calc(100% - 6px);
     max-height: 220px;
     overflow-y: auto;
@@ -245,9 +258,6 @@
   }
 
   @media (max-width: 768px) {
-    .composer {
-      padding: 10px 12px;
-    }
     textarea {
       font-size: 14px;
       padding: 10px 12px;

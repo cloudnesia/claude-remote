@@ -1,11 +1,46 @@
 <script lang="ts">
   import { askQuestions } from '@company/protocol'
   import AskQuestions from './AskQuestions.svelte'
+  import AttachChips from './AttachChips.svelte'
+  import { filesToAttachments, type PendingAttachment } from './attachments.ts'
   import { store } from './store.svelte.ts'
   import ToolCall from './ToolCall.svelte'
   import Transcript from './Transcript.svelte'
 
   let { sessionId, closable }: { sessionId: string; closable: boolean } = $props()
+
+  let pending = $state<PendingAttachment[]>([])
+  let fileInput = $state<HTMLInputElement | null>(null)
+  let dragOver = $state(false)
+
+  async function addFiles(files: FileList | File[] | null) {
+    if (!files || !files.length) return
+    const { attachments, errors } = await filesToAttachments(files, pending.length)
+    if (attachments.length) pending = [...pending, ...attachments]
+    if (errors.length) {
+      store.notice = errors.join('; ')
+      setTimeout(() => (store.notice = null), 4000)
+    }
+  }
+
+  function onPick(e: Event) {
+    addFiles((e.currentTarget as HTMLInputElement).files)
+    if (fileInput) fileInput.value = ''
+  }
+
+  function onPaste(e: ClipboardEvent) {
+    const files = [...(e.clipboardData?.items ?? [])]
+      .filter((i) => i.kind === 'file')
+      .map((i) => i.getAsFile())
+      .filter((f): f is File => !!f)
+    if (files.length) addFiles(files)
+  }
+
+  function onDrop(e: DragEvent) {
+    e.preventDefault()
+    dragOver = false
+    if (e.dataTransfer?.files.length) addFiles(e.dataTransfer.files)
+  }
 
   const meta = $derived(store.meta(sessionId))
   const view = $derived(store.view(sessionId))
@@ -29,9 +64,10 @@
     const v = view
     if (!v) return
     const t = v.draft.trim()
-    if (!t) return
-    store.prompt(sessionId, t)
+    if (!t && !pending.length) return
+    store.prompt(sessionId, t, pending)
     v.draft = ''
+    pending = []
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -157,22 +193,57 @@
       <div class="blank">memuat…</div>
     {/if}
 
-    <form class="composer" onsubmit={submit}>
+    <AttachChips attachments={pending} onremove={(id) => (pending = pending.filter((a) => a.id !== id))} />
+
+    <form
+      class="composer"
+      class:dragover={dragOver}
+      onsubmit={submit}
+      ondragover={(e) => {
+        e.preventDefault()
+        dragOver = true
+      }}
+      ondragleave={() => (dragOver = false)}
+      ondrop={onDrop}
+    >
+      <input
+        bind:this={fileInput}
+        type="file"
+        accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+        multiple
+        hidden
+        onchange={onPick}
+      />
+      <button
+        type="button"
+        class="clip"
+        disabled={!view?.canPrompt}
+        onclick={() => fileInput?.click()}
+        title="Lampirkan foto atau PDF"
+      >
+        📎
+      </button>
       <textarea
         value={view?.draft ?? ''}
         oninput={(e) => {
           if (view) view.draft = e.currentTarget.value
         }}
         onkeydown={onKeydown}
+        onpaste={onPaste}
         rows="2"
         disabled={!view?.canPrompt}
         placeholder={view?.canPrompt
-          ? 'Tulis prompt…'
+          ? 'Tulis prompt… (tempel/drag foto atau PDF juga bisa)'
           : meta.status === 'offline'
             ? 'Host offline — hanya bisa dibaca'
             : 'Hanya owner yang bisa mengirim prompt'}
       ></textarea>
-      <button type="submit" disabled={!view?.canPrompt || !view?.draft.trim()}>Kirim</button>
+      <button
+        type="submit"
+        disabled={!view?.canPrompt || (!view?.draft.trim() && !pending.length)}
+      >
+        Kirim
+      </button>
     </form>
   {/if}
 </section>
@@ -368,9 +439,35 @@
   }
   .composer {
     display: flex;
+    align-items: flex-end;
     gap: 8px;
     padding: 12px 16px 14px;
     border-top: 1px solid #23272f;
+  }
+  .composer.dragover {
+    background: rgba(74, 158, 255, 0.06);
+    outline: 1.5px dashed #4a9eff;
+    outline-offset: -4px;
+  }
+  .clip {
+    flex: none;
+    background: none;
+    border: 1px solid #3a3f4a;
+    color: #9aa3b2;
+    border-radius: 7px;
+    width: 36px;
+    height: 36px;
+    font-size: 15px;
+    cursor: pointer;
+    padding: 0;
+  }
+  .clip:hover:not(:disabled) {
+    color: #4a9eff;
+    border-color: #4a9eff;
+  }
+  .clip:disabled {
+    color: #4b515c;
+    cursor: default;
   }
   textarea {
     flex: 1;
@@ -443,6 +540,12 @@
     .composer button {
       font-size: 14px;
       padding: 0 18px;
+    }
+    .clip {
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      font-size: 17px;
     }
     .model {
       font-size: 12px;

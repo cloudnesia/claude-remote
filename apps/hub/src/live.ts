@@ -103,6 +103,11 @@ export function ingest(frame: Frame): void {
     case 'user_msg': {
       const m = emptyMessage('user', `u_${frame.seq}`)
       m.blocks.push({ kind: 'text', text: ev.text })
+      // Byte lampiran sudah lewat sesaat sebelumnya (langsung agent → Claude);
+      // yang menetap di transcript cuma jejaknya, lihat AttachmentMeta.
+      for (const a of ev.attachments ?? []) {
+        m.blocks.push({ kind: 'attachment', name: a.name, mime: a.mime })
+      }
       m.ts = frame.ts
       persistMessage(frame.sessionId, frame.seq, m)
       durable(frame.sessionId, frame.seq)

@@ -1,7 +1,9 @@
 import {
   applyEv,
   emptyMessage,
+  validateAttachments,
   type Answers,
+  type Attachment,
   type BrowseResult,
   type Decision,
   type Frame,
@@ -290,6 +292,9 @@ class Store {
       case 'user_msg': {
         const msg = emptyMessage('user', `u_${f.seq}`)
         msg.blocks.push({ kind: 'text', text: ev.text })
+        for (const a of ev.attachments ?? []) {
+          msg.blocks.push({ kind: 'attachment', name: a.name, mime: a.mime })
+        }
         v.messages.push(msg)
         break
       }
@@ -383,8 +388,21 @@ class Store {
 
   // ------------------------------------------------------------------ aksi
 
-  prompt(sessionId: string, text: string): void {
-    this.#send({ t: 'prompt', sessionId, text })
+  /**
+   * `attachments` sudah base64 di sini — `attachments.ts` (dipakai dari
+   * Pane.svelte/GeneralPane.svelte) yang membaca file dan meng-encode-nya.
+   * Divalidasi lagi di sini (bukan cuma di composer) supaya `notice` konsisten
+   * dari satu tempat; hub tetap menegakkan ulang batas yang sama karena
+   * browser bukan batas kepercayaan.
+   */
+  prompt(sessionId: string, text: string, attachments?: Attachment[]): void {
+    const reason = validateAttachments(attachments)
+    if (reason) {
+      this.notice = reason
+      setTimeout(() => (this.notice = null), 4000)
+      return
+    }
+    this.#send({ t: 'prompt', sessionId, text, attachments })
   }
 
   interrupt(sessionId: string): void {

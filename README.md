@@ -509,8 +509,11 @@ Rinciannya di `docs/PROTOCOL.md` §5.
 
 - **Login user** — token seeder masih satu-satunya cara masuk ke web. Ini
   lubang auth terakhir yang tersisa; pairing host sudah tidak pakai token manual.
-- **Eviction idle** sudah ditulis (`IDLE_MS`, default 10 menit) tapi belum
-  diuji di bawah kondisi idle sungguhan.
+- **Eviction idle** sudah ditulis (`IDLE_MS`) tapi **nonaktif secara default**
+  — belum teruji di bawah kondisi idle sungguhan, dan operator memang mau
+  session selalu siap selama agent-nya hidup, tidak "beku" sendiri. Set
+  `IDLE_MS` (ms) di env agent kalau mau diaktifkan lagi karena resource
+  laptop jadi masalah nyata.
 - **Hapus session** — `close_session` ada di protokol tapi belum ada tombolnya.
   Berlaku juga untuk general session: judulnya ikut belum bisa diganti, dan
   lane yang sudah dibuat belum bisa dilepas satu-satu.

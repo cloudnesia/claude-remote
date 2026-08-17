@@ -23,8 +23,17 @@ function attachmentBlock(a: Attachment): unknown {
     : { type: 'image', source }
 }
 
-/** Session tanpa aktivitas selama ini akan dimatikan prosesnya (jadi "cold"). */
-const IDLE_MS = Number(process.env.IDLE_MS ?? 10 * 60_000)
+/**
+ * Session tanpa aktivitas selama ini akan dimatikan prosesnya (jadi "cold")
+ * untuk menghemat resource — proses Claude Code yang menganggur tetap makan
+ * RAM/CPU. NONAKTIF secara default (`0` = tidak pernah): eviction ini
+ * ditandai belum teruji di bawah kondisi idle sungguhan (lihat README §Belum
+ * ada), dan yang diminta operator justru sebaliknya — session harus selalu
+ * siap dipakai selama agent-nya hidup, tidak boleh "beku" sendiri. Set
+ * `IDLE_MS` (ms) lewat env kalau resource laptop jadi masalah nyata dan mau
+ * eviction-nya diaktifkan lagi.
+ */
+const IDLE_MS = Number(process.env.IDLE_MS ?? 0)
 
 type Emit = (frame: Frame) => void
 
@@ -195,6 +204,11 @@ export class SessionRunner {
 
   private touch(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = null
+    // IDLE_MS <= 0 = eviction idle nonaktif (default). Tidak ada timer sama
+    // sekali dijalankan — bukan cuma timer dengan delay 0, yang di setTimeout
+    // artinya "secepatnya", kebalikan dari yang dimaksud.
+    if (IDLE_MS <= 0) return
     this.idleTimer = setTimeout(() => {
       if (this.q) {
         console.log(`[agent] session ${this.sessionId.slice(0, 8)} idle → cold`)

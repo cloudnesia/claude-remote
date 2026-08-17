@@ -3,6 +3,22 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { GeneralMeta, LaneMeta, Message, SessionMeta, UserMeta, Visibility } from '@company/protocol'
 
+/**
+ * `JSON.parse` yang tidak pernah melempar. Dipakai untuk kolom TEXT berisi
+ * JSON (blocks, models) yang dibaca lewat roster/snapshot — query yang sama
+ * dijalankan untuk BANYAK user sekaligus tiap koneksi masuk. Satu baris korup
+ * (harusnya tidak mungkin, tapi disk/migrasi lama bisa saja meninggalkan
+ * sisa) tidak boleh melempar exception tak tertangkap yang menjatuhkan
+ * seluruh proses hub untuk semua orang — mendingan satu baris tampil kosong.
+ */
+function safeJson<T>(raw: string, fallback: T): T {
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback
+  }
+}
+
 const DB_PATH = process.env.DB_PATH ?? './data/hub.db'
 
 mkdirSync(dirname(DB_PATH), { recursive: true })
@@ -379,7 +395,7 @@ export function messagesOf(sessionId: string): Message[] {
   return rows.map((r) => ({
     id: r.id,
     role: r.role,
-    blocks: JSON.parse(r.blocks),
+    blocks: safeJson(r.blocks, []),
     ts: r.ts,
   }))
 }
@@ -441,7 +457,7 @@ export function roster(
       platform: h.platform,
       online: isOnline(h.id),
       revoked: !!h.revoked,
-      models: JSON.parse(h.models || '[]'),
+      models: safeJson(h.models || '[]', []),
       gateway: h.gateway_url ?? null,
       sessions: (q.sessionsOf.all(h.id) as SessionRow[])
         .filter((s) => s.visibility !== 'private' || s.owner_id === visibleTo)

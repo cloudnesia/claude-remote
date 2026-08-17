@@ -27,6 +27,22 @@ import {
   subscribe,
 } from './live.ts'
 
+/**
+ * Jaring pengaman terakhir. try/catch di onAgent()/onBrowser()/broadcastRoster()
+ * menangkap hampir semua kasus nyata, tapi tidak ada cara menjamin SETIAP
+ * jalur async/timer di masa depan ikut dibungkus. Tanpa ini, satu lubang yang
+ * kelewat bikin systemd (Restart=always) merestart hub berulang-ulang untuk
+ * SEMUA user tiap kali kondisi yang sama terulang — persis gejala "agent
+ * konek, hello, lalu langsung terputus" berulang tanpa henti. Log lalu jalan
+ * terus jauh lebih baik daripada crash-loop yang mematikan layanan bersama.
+ */
+process.on('uncaughtException', (err) => {
+  console.error('[hub] uncaught exception (proses tetap jalan):', err)
+})
+process.on('unhandledRejection', (err) => {
+  console.error('[hub] unhandled rejection (proses tetap jalan):', err)
+})
+
 const PORT = Number(process.env.PORT ?? 8787)
 // Bind ke 127.0.0.1 kalau ada reverse proxy di depan; default terbuka supaya
 // pemasangan tanpa proxy tetap jalan.
@@ -88,7 +104,15 @@ onStatusChange(() => {
 
 function broadcastRoster(): void {
   for (const c of browsers) {
-    sendBrowser(c, { t: 'roster', users: db.roster(c.userId, statusOf, isOnline), me: c.userId })
+    try {
+      sendBrowser(c, { t: 'roster', users: db.roster(c.userId, statusOf, isOnline), me: c.userId })
+    } catch (err) {
+      // Dipanggil juga dari timer debounce di onStatusChange() — DI LUAR
+      // try/catch per-pesan di onAgent/onBrowser. Tanpa penjaga di sini,
+      // roster yang gagal dibangun untuk SATU user (data korup, dsb.) jadi
+      // exception tak tertangkap yang menjatuhkan hub untuk semua orang.
+      console.error(`[hub] gagal membangun roster untuk user ${c.userId}:`, err)
+    }
   }
 }
 
@@ -286,6 +310,13 @@ function onAgent(ws: WebSocket, host: db.HostRow): void {
   ws.on('pong', () => (conn.alive = true))
 
   ws.on('message', (raw) => {
+    // Satu proses hub melayani SEMUA koneksi (agent + browser sekaligus).
+    // Tanpa try/catch di sini, satu pesan yang memicu exception — bug di
+    // handler, data korup, apa pun — menjatuhkan hub untuk semua orang, lalu
+    // systemd me-restart-nya (Restart=always) hanya untuk jatuh lagi begitu
+    // pesan yang sama diulang: crash-loop yang dari sisi agent kelihatan
+    // seperti "terputus, reconnect" tanpa henti.
+    try {
     const m = safeParse<AgentToHub>(String(raw))
     if (!m) return
 
@@ -358,6 +389,9 @@ function onAgent(ws: WebSocket, host: db.HostRow): void {
         break
       }
     }
+    } catch (err) {
+      console.error(`[hub] error memproses pesan dari agent ${host.name}:`, err)
+    }
   })
 
   const bye = () => {
@@ -380,6 +414,10 @@ function onBrowser(ws: WebSocket, user: db.UserRow): void {
   sendBrowser(conn, { t: 'roster', users: db.roster(user.id, statusOf, isOnline), me: user.id })
 
   ws.on('message', (raw) => {
+    // Lihat catatan yang sama di onAgent(): satu proses hub melayani semua
+    // koneksi, jadi satu pesan browser yang melempar exception tidak boleh
+    // menjatuhkan hub untuk semua orang.
+    try {
     const m = safeParse<BrowserToHub>(String(raw))
     if (!m) return
 
@@ -626,6 +664,9 @@ function onBrowser(ws: WebSocket, user: db.UserRow): void {
           answers: m.answers,
         })
         break
+    }
+    } catch (err) {
+      console.error(`[hub] error memproses pesan dari browser (user ${user.id}):`, err)
     }
   })
 

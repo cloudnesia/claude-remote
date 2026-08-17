@@ -77,9 +77,9 @@
         <TabBar />
         {#if store.active}
           {#if store.isGeneral(store.active)}
-            <GeneralPane sessionId={store.active} closable={true} />
+            <GeneralPane sessionId={store.active} />
           {:else}
-            <Pane sessionId={store.active} closable={true} />
+            <Pane sessionId={store.active} />
           {/if}
         {/if}
       {/if}

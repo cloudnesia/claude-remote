@@ -7,7 +7,7 @@
   import ToolCall from './ToolCall.svelte'
   import Transcript from './Transcript.svelte'
 
-  let { sessionId, closable }: { sessionId: string; closable: boolean } = $props()
+  let { sessionId }: { sessionId: string } = $props()
 
   let pending = $state<PendingAttachment[]>([])
   let fileInput = $state<HTMLInputElement | null>(null)
@@ -84,11 +84,6 @@
   {:else}
     <header>
       <div class="title">{meta.title}</div>
-      {#if closable}
-        <button class="icon" onclick={() => store.closePane(sessionId)} title="Tutup tab">
-          ✕
-        </button>
-      {/if}
     </header>
 
     {#if view?.pending && asking && view.canPrompt}
@@ -357,27 +352,6 @@
   .auto.ro {
     cursor: default;
   }
-  .icon {
-    background: #2b2f38;
-    border: 1px solid #3a3f4a;
-    color: #c9d1d9;
-    border-radius: 5px;
-    width: 28px;
-    height: 28px;
-    line-height: 1;
-    font-size: 14px;
-    cursor: pointer;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex: none;
-  }
-  .icon:hover {
-    color: #fff;
-    border-color: #4a9eff;
-    background: #3a4759;
-  }
   .blank {
     flex: 1;
     display: grid;
@@ -603,11 +577,6 @@
       padding: 8px 12px;
     }
     .title {
-      font-size: 15px;
-    }
-    .icon {
-      width: 32px;
-      height: 32px;
       font-size: 15px;
     }
     .toolbar {

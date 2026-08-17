@@ -133,6 +133,69 @@ export type Usage = {
   cacheCreationTokens: number
 }
 
+// ------------------------------------------------------------- lampiran
+
+/**
+ * Tipe file yang didukung sebagai lampiran prompt — keduanya native di API
+ * Claude (vision untuk gambar, dokumen untuk PDF), jadi tidak perlu jalur
+ * ekstraksi teks sendiri. Tipe lain (kode, .txt, dst) belum didukung.
+ */
+export const ATTACHMENT_MIME_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+] as const
+
+export type AttachmentMime = (typeof ATTACHMENT_MIME_TYPES)[number]
+
+/** Batas per lampiran SEBELUM di-encode base64 (base64 ~4/3 lebih besar). */
+export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+export const MAX_ATTACHMENTS_PER_PROMPT = 4
+
+/**
+ * Lampiran sungguhan, byte-nya ikut — perjalanan browser → hub → agent SAJA.
+ * Tidak pernah disimpan permanen (lihat AttachmentMeta) dan tidak pernah
+ * dikirim balik ke browser lewat jalur lain.
+ */
+export type Attachment = {
+  name: string
+  mime: string
+  dataBase64: string
+}
+
+/**
+ * Jejak sebuah lampiran di transcript — nama & tipe saja, TANPA byte-nya.
+ * Inilah yang disimpan permanen di DB hub dan dikirim ke browser sebagai
+ * bagian dari Message; byte aslinya cuma hidup sesaat untuk giliran itu.
+ */
+export type AttachmentMeta = { name: string; mime: string }
+
+/**
+ * Validasi lampiran sebelum dikirim/diteruskan. Dipakai DUA kali — browser
+ * (supaya user tahu sebelum submit) dan hub (supaya klien nakal atau web versi
+ * lama tidak bisa menyelundupkan lampiran raksasa/tipe aneh ke agent). Satu
+ * implementasi di sini biar batasnya tidak pernah beda antara keduanya.
+ */
+export function validateAttachments(attachments: Attachment[] | undefined): string | null {
+  if (!attachments || !attachments.length) return null
+  if (attachments.length > MAX_ATTACHMENTS_PER_PROMPT) {
+    return `maksimal ${MAX_ATTACHMENTS_PER_PROMPT} lampiran per prompt`
+  }
+  for (const a of attachments) {
+    if (!(ATTACHMENT_MIME_TYPES as readonly string[]).includes(a.mime)) {
+      return `tipe file tidak didukung: ${a.name || a.mime}`
+    }
+    // base64 ~4/3 dari ukuran biner asli; dibalik untuk estimasi ukuran asli.
+    const approxBytes = (a.dataBase64.length * 3) / 4
+    if (approxBytes > MAX_ATTACHMENT_BYTES) {
+      return `${a.name} kelebihan ukuran (maks ${Math.floor(MAX_ATTACHMENT_BYTES / (1024 * 1024))}MB)`
+    }
+  }
+  return null
+}
+
 export type Ev =
   /**
    * Prompt user, di-echo balik OLEH AGENT (bukan ditulis hub langsung).
@@ -140,7 +203,7 @@ export type Ev =
    * tunggal — kalau hub menyisipkan seq-nya sendiri, replay setelah
    * reconnect akan bertabrakan dengan seq milik agent.
    */
-  | { t: 'user_msg'; text: string }
+  | { t: 'user_msg'; text: string; attachments?: AttachmentMeta[] }
   | { t: 'turn_start' }
   | { t: 'text_delta'; blk: number; text: string }
   | { t: 'thinking_delta'; blk: number; text: string }
@@ -221,7 +284,7 @@ export type HubToAgent =
   | { t: 'revoked'; reason: string }
   | { t: 'browse'; reqId: string; path: string }
   | { t: 'create_session'; sessionId: string; cwd: string; title: string; auto: boolean }
-  | { t: 'prompt'; sessionId: string; text: string }
+  | { t: 'prompt'; sessionId: string; text: string; attachments?: Attachment[] }
   | { t: 'interrupt'; sessionId: string }
   /** `answers` hanya untuk `ASK_TOOL`; diabaikan untuk tool lain. */
   | { t: 'approval_resp'; sessionId: string; reqId: string; decision: Decision; answers?: Answers }
@@ -257,7 +320,7 @@ export type AgentToHub =
 export type BrowserToHub =
   | { t: 'subscribe'; sessionId: string }
   | { t: 'unsubscribe'; sessionId: string }
-  | { t: 'prompt'; sessionId: string; text: string }
+  | { t: 'prompt'; sessionId: string; text: string; attachments?: Attachment[] }
   | { t: 'interrupt'; sessionId: string }
   | { t: 'approve'; sessionId: string; reqId: string; decision: Decision; answers?: Answers }
   | { t: 'new_session'; hostId: string; cwd: string; title: string }
@@ -361,6 +424,13 @@ export type Block =
       done: boolean
       result?: { ok: boolean; content: unknown }
     }
+  /**
+   * Jejak lampiran yang dikirim user bersama prompt — nama & tipe saja.
+   * Byte aslinya tidak pernah masuk sini (lihat AttachmentMeta); blok ini
+   * murni supaya transcript tetap menunjukkan "pernah ada lampiran" setelah
+   * reload, walau isinya sendiri sudah tidak tersimpan di mana pun.
+   */
+  | { kind: 'attachment'; name: string; mime: string }
 
 export type Message = {
   id: string

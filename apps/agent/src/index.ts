@@ -198,7 +198,7 @@ function connect(): void {
         // Floor seq wajib diangkat dulu, kalau tidak frame pertama memakai
         // seq 1 yang sudah lama terpakai dan hub akan membuangnya diam-diam.
         r.outbox.raiseFloor(coldFloor[m.sessionId] ?? 0)
-        r.prompt(m.text)
+        r.prompt(m.text, m.attachments)
         break
       }
 

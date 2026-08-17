@@ -1,8 +1,27 @@
 import { query, type Query } from '@anthropic-ai/claude-agent-sdk'
-import { ASK_TOOL, type Answers, type Decision, type Ev, type Frame } from '@company/protocol'
+import {
+  ASK_TOOL,
+  type Answers,
+  type Attachment,
+  type Decision,
+  type Ev,
+  type Frame,
+} from '@company/protocol'
 import { Outbox } from './outbox.ts'
 import { checkCwd } from './fs.ts'
 import { claudeSpawnOptions } from './claude.ts'
+
+/**
+ * Lampiran → content block Claude Messages API. Cuma dua bentuk yang didukung
+ * — validateAttachments() di protocol sudah menolak mime lain sebelum sampai
+ * sini, jadi PDF adalah satu-satunya yang bukan gambar yang bisa lewat.
+ */
+function attachmentBlock(a: Attachment): unknown {
+  const source = { type: 'base64', media_type: a.mime, data: a.dataBase64 }
+  return a.mime === 'application/pdf'
+    ? { type: 'document', source, title: a.name }
+    : { type: 'image', source }
+}
 
 /** Session tanpa aktivitas selama ini akan dimatikan prosesnya (jadi "cold"). */
 const IDLE_MS = Number(process.env.IDLE_MS ?? 10 * 60_000)
@@ -22,10 +41,23 @@ class PromptQueue implements AsyncIterable<any> {
   private wake: (() => void) | null = null
   private closed = false
 
-  push(text: string): void {
+  push(text: string, attachments?: Attachment[]): void {
+    // Teks duluan: lampiran sebagai konteks visual/dokumen untuk kalimat
+    // yang menyusul terasa lebih wajar daripada teks yang "mendahului" apa
+    // yang baru dijelaskan setelahnya. Blok teks kosong SENGAJA dilewati,
+    // bukan cuma dikirim string kosong — "@node" + foto tanpa kalimat lain
+    // itu jalur yang sekarang valid (lihat handleGeneral di hub), dan API
+    // menolak content block bertipe text yang isinya kosong/whitespace saja.
+    const content: unknown[] = []
+    if (text.trim()) content.push({ type: 'text', text })
+    for (const a of attachments ?? []) content.push(attachmentBlock(a))
+    // Tidak boleh keduanya kosong — submit tanpa teks maupun lampiran sudah
+    // dicegah di composer web, ini jaring pengaman terakhir di sisi agent.
+    if (!content.length) content.push({ type: 'text', text: text || ' ' })
+
     this.items.push({
       type: 'user',
-      message: { role: 'user', content: [{ type: 'text', text }] },
+      message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: '',
     })
@@ -103,9 +135,16 @@ export class SessionRunner {
 
   // ------------------------------------------------------------- lifecycle
 
-  prompt(text: string): void {
+  prompt(text: string, attachments?: Attachment[]): void {
     this.touch()
-    this.send({ t: 'user_msg', text })
+    // Byte-nya TIDAK ikut ke sini — cuma nama & tipe. Isi sungguhan cuma
+    // lewat sekali lagi lewat this.queue.push() di bawah, langsung ke Claude;
+    // yang menetap di transcript hub cuma jejaknya (lihat live.ts).
+    this.send({
+      t: 'user_msg',
+      text,
+      attachments: attachments?.map((a) => ({ name: a.name, mime: a.mime })),
+    })
     this.send({ t: 'turn_start' })
     this.send({ t: 'status', status: 'thinking' })
     this.blkBase = 0
@@ -113,7 +152,7 @@ export class SessionRunner {
     this.toolJson.clear()
 
     if (!this.q) this.start()
-    this.queue.push(text)
+    this.queue.push(text, attachments)
   }
 
   /**

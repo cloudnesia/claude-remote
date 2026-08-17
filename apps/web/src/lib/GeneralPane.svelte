@@ -1,12 +1,47 @@
 <script lang="ts">
   import { askQuestions, nodeSlug, type LaneMeta } from '@company/protocol'
   import AskQuestions from './AskQuestions.svelte'
+  import AttachChips from './AttachChips.svelte'
+  import { filesToAttachments, type PendingAttachment } from './attachments.ts'
   import MentionInput from './MentionInput.svelte'
   import { store } from './store.svelte.ts'
   import ToolCall from './ToolCall.svelte'
   import Transcript from './Transcript.svelte'
 
   let { sessionId, closable }: { sessionId: string; closable: boolean } = $props()
+
+  let pending = $state<PendingAttachment[]>([])
+  let fileInput = $state<HTMLInputElement | null>(null)
+  let dragOver = $state(false)
+
+  async function addFiles(files: FileList | File[] | null) {
+    if (!files || !files.length) return
+    const { attachments, errors } = await filesToAttachments(files, pending.length)
+    if (attachments.length) pending = [...pending, ...attachments]
+    if (errors.length) {
+      store.notice = errors.join('; ')
+      setTimeout(() => (store.notice = null), 4000)
+    }
+  }
+
+  function onPick(e: Event) {
+    addFiles((e.currentTarget as HTMLInputElement).files)
+    if (fileInput) fileInput.value = ''
+  }
+
+  function onPaste(e: ClipboardEvent) {
+    const files = [...(e.clipboardData?.items ?? [])]
+      .filter((i) => i.kind === 'file')
+      .map((i) => i.getAsFile())
+      .filter((f): f is File => !!f)
+    if (files.length) addFiles(files)
+  }
+
+  function onDrop(e: DragEvent) {
+    e.preventDefault()
+    dragOver = false
+    if (e.dataTransfer?.files.length) addFiles(e.dataTransfer.files)
+  }
 
   const gv = $derived(store.generalView(sessionId))
   const meta = $derived(store.generalMeta(sessionId))
@@ -35,9 +70,10 @@
   function submit() {
     if (!gv) return
     const t = gv.draft.trim()
-    if (!t) return
-    store.prompt(sessionId, t)
+    if (!t && !pending.length) return
+    store.prompt(sessionId, t, pending)
     gv.draft = ''
+    pending = []
   }
 
   /** Label lane: nama node saja, kecuali direktorinya bukan yang default. */
@@ -172,15 +208,49 @@
     </div>
   {/if}
 
-  <MentionInput
-    value={gv?.draft ?? ''}
-    disabled={!gv?.canPrompt}
-    placeholder={gv?.canPrompt
-      ? 'Sebut node dengan @, lalu tulis prompt…'
-      : 'Hanya owner yang bisa mengirim prompt'}
-    oninput={(v) => gv && (gv.draft = v)}
-    onsubmit={submit}
-  />
+  <AttachChips attachments={pending} onremove={(id) => (pending = pending.filter((a) => a.id !== id))} />
+
+  <div
+    class="attach-row"
+    class:dragover={dragOver}
+    role="group"
+    aria-label="Composer, drag-drop foto atau PDF di sini"
+    ondragover={(e) => {
+      e.preventDefault()
+      dragOver = true
+    }}
+    ondragleave={() => (dragOver = false)}
+    ondrop={onDrop}
+  >
+    <input
+      bind:this={fileInput}
+      type="file"
+      accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+      multiple
+      hidden
+      onchange={onPick}
+    />
+    <button
+      type="button"
+      class="clip"
+      disabled={!gv?.canPrompt}
+      onclick={() => fileInput?.click()}
+      title="Lampirkan foto atau PDF"
+    >
+      📎
+    </button>
+    <MentionInput
+      value={gv?.draft ?? ''}
+      disabled={!gv?.canPrompt}
+      placeholder={gv?.canPrompt
+        ? 'Sebut node dengan @, lalu tulis prompt… (tempel/drag foto atau PDF juga bisa)'
+        : 'Hanya owner yang bisa mengirim prompt'}
+      oninput={(v) => gv && (gv.draft = v)}
+      onsubmit={submit}
+      onpaste={onPaste}
+      hasAttachments={pending.length > 0}
+    />
+  </div>
 </section>
 
 <style>
@@ -386,6 +456,38 @@
     color: #4b515c;
     font-size: 13px;
   }
+  .attach-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 12px 16px 14px;
+    border-top: 1px solid #23272f;
+  }
+  .attach-row.dragover {
+    background: rgba(74, 158, 255, 0.06);
+    outline: 1.5px dashed #4a9eff;
+    outline-offset: -4px;
+  }
+  .clip {
+    flex: none;
+    background: none;
+    border: 1px solid #3a3f4a;
+    color: #9aa3b2;
+    border-radius: 7px;
+    width: 36px;
+    height: 36px;
+    font-size: 15px;
+    cursor: pointer;
+    padding: 0;
+  }
+  .clip:hover:not(:disabled) {
+    color: #4a9eff;
+    border-color: #4a9eff;
+  }
+  .clip:disabled {
+    color: #4b515c;
+    cursor: default;
+  }
   .approval {
     display: flex;
     flex-direction: column;
@@ -445,6 +547,15 @@
       min-height: 260px;
       border-right: none;
       border-bottom: 1px solid #1b1f26;
+    }
+    .attach-row {
+      padding: 10px 12px;
+    }
+    .clip {
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      font-size: 17px;
     }
   }
 </style>

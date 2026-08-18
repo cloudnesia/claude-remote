@@ -8,7 +8,7 @@
   import ToolCall from './ToolCall.svelte'
   import Transcript from './Transcript.svelte'
 
-  let { sessionId, closable }: { sessionId: string; closable: boolean } = $props()
+  let { sessionId }: { sessionId: string } = $props()
 
   let pending = $state<PendingAttachment[]>([])
   let fileInput = $state<HTMLInputElement | null>(null)
@@ -108,9 +108,6 @@
         <button class="icon" onclick={() => store.interrupt(sessionId)} title="Hentikan semua node">
           ■
         </button>
-      {/if}
-      {#if closable}
-        <button class="icon" onclick={() => store.closePane(sessionId)} title="Tutup tab">✕</button>
       {/if}
     </div>
   </header>

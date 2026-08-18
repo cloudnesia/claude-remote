@@ -109,21 +109,33 @@ export function parseMentions(text: string): Mention[] {
 }
 
 /**
- * Buang sebutan yang benar-benar dipakai untuk routing dari teks prompt.
- * Yang tidak cocok dengan node mana pun sengaja DIBIARKAN — bisa jadi itu
- * memang bagian dari kalimat (`email @gmail`), bukan alamat node.
+ * Ganti tiap sebutan yang benar-benar dipakai untuk routing dengan hasil
+ * `resolve(m)` — string kosong untuk sekadar membuang (lihat `stripMentions`),
+ * atau identitas node sungguhan (nama+IP) supaya Claude tahu persis mesin
+ * mana yang dimaksud, bukan cuma melihat "@laptop-a" hilang tanpa jejak.
+ * Sebutan yang tidak cocok node mana pun sengaja DIBIARKAN apa adanya — bisa
+ * jadi itu memang bagian dari kalimat (`email @gmail`), bukan alamat node.
  */
-export function stripMentions(text: string, used: Mention[]): string {
+export function replaceMentions(
+  text: string,
+  used: Mention[],
+  resolve: (m: Mention) => string,
+): string {
   if (!used.length) return text.trim()
-  const drop = new Set(used.map((m) => m.index))
   let out = ''
   let cursor = 0
-  for (const m of used.filter((x) => drop.has(x.index)).sort((a, b) => a.index - b.index)) {
+  for (const m of [...used].sort((a, b) => a.index - b.index)) {
     out += text.slice(cursor, m.index)
+    out += resolve(m)
     cursor = m.index + m.raw.length
   }
   out += text.slice(cursor)
   return out.replace(/[ \t]{2,}/g, ' ').trim()
+}
+
+/** Buang sebutan yang benar-benar dipakai untuk routing dari teks prompt. */
+export function stripMentions(text: string, used: Mention[]): string {
+  return replaceMentions(text, used, () => '')
 }
 
 export type Usage = {
@@ -296,7 +308,18 @@ export type HubToAgent =
   | { t: 'ack'; sessionId: string; seq: number }
 
 export type AgentToHub =
-  | { t: 'auth'; v: number; hostName: string; platform: string; agentVersion: string }
+  | {
+      t: 'auth'
+      v: number
+      hostName: string
+      platform: string
+      agentVersion: string
+      /** IPv4 lokal laptop (self-report, bukan yang dilihat hub dari koneksi
+       * masuk — itu bisa jadi alamat proxy/NAT). Null kalau tidak ketemu
+       * interface non-internal. Dipakai buat mengganti @sebutan dengan
+       * identitas node sungguhan sebelum teks sampai ke Claude (general.ts). */
+      ip: string | null
+    }
   | {
       t: 'session_state'
       sessionId: string

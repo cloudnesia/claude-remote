@@ -173,7 +173,7 @@ replay setelah reconnect.
 
 | `t`               | field                                          | arti |
 |-------------------|------------------------------------------------|------|
-| `auth`            | `v`, `hostName`, `platform`, `agentVersion`     | frame pertama dari agent |
+| `auth`            | `v`, `hostName`, `platform`, `agentVersion`, `ip` | frame pertama dari agent; `ip` = IPv4 lokal self-report, null kalau tidak ketemu |
 | `session_state`   | `sessionId`, `alive`, `claudeSessionId?`, `cwd` | lapor proses hidup/mati (juga saat reconnect) |
 | `frame`           | `Frame`                                         | event stream |
 | `browse_result`   | `reqId`, `result`                               | jawaban `browse` |
@@ -397,9 +397,10 @@ sebuah general punya satu **lane**, dan lane adalah row `sessions` biasa dengan
 - Agent **tidak tahu** general session itu ada. Yang dilihatnya cuma
   `create_session` dan `prompt` seperti biasa.
 
-Yang baru hanya di hub (routing sebutan → lane) dan di browser (render lane
-bersebelahan). Roster menyembunyikan lane dari daftar session host supaya tidak
-muncul dua kali.
+Yang baru hanya di hub (routing sebutan → lane) dan di browser (transcript
+lane digabung jadi satu percakapan kronologis, tiap balasan assistant diberi
+label node sumbernya — lihat GeneralPane.svelte). Roster menyembunyikan lane
+dari daftar session host supaya tidak muncul dua kali.
 
 ### Aturan sebutan
 
@@ -419,7 +420,13 @@ muncul dua kali.
   dan fan-out memang tujuan fitur ini, jadi semuanya dipakai.
 - Sebutan yang tidak cocok ke node mana pun **dibiarkan di teks prompt** —
   bisa jadi itu memang bagian kalimat (`email @gmail`) — lalu dilaporkan lewat
-  `denied`. Yang cocok dibuang dari teks sebelum dikirim ke agent.
+  `denied`. Yang cocok **diganti** (bukan cuma dibuang) dengan identitas node
+  sungguhan — nama + IP lokal (`replaceMentions()` di protocol,
+  `describeHost()` di general.ts) — sebelum dikirim ke agent, supaya Claude
+  yang menjawab tahu persis mesin mana yang dimaksud alih-alih melihat
+  sebutan itu lenyap tanpa jejak. `@all` diganti daftar semua node online.
+  IP-nya self-report dari agent lewat `auth.ip` (§3) — bukan yang dilihat hub
+  dari koneksi masuk, itu bisa jadi alamat proxy/NAT.
 - Node yang disebut tapi offline dilewati, dan itu **selalu dilaporkan**:
   prompt yang diam-diam cuma mendarat di sebagian node lebih berbahaya
   daripada yang gagal terang-terangan.

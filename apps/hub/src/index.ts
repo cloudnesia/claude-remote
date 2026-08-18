@@ -323,7 +323,7 @@ function onAgent(ws: WebSocket, host: db.HostRow): void {
     switch (m.t) {
       case 'auth': {
         if (m.v !== PROTOCOL_VERSION) return ws.close(CLOSE.BAD_VERSION, 'protocol mismatch')
-        db.markHostSeen(host.id, m.hostName, m.platform)
+        db.markHostSeen(host.id, m.hostName, m.platform, m.ip ?? null)
 
         // resumeFrom = titik tertinggi yang hub sudah tahu, bukan sekadar yang
         // durable. Ini menangani dua arah kegagalan sekaligus: hub yang restart

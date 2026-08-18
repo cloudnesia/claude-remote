@@ -2,10 +2,21 @@ import {
   MENTION_ALL,
   nodeSlug,
   parseMentions,
-  stripMentions,
+  replaceMentions,
   type Mention,
 } from '@company/protocol'
 import type { HostRow } from './db.ts'
+
+/**
+ * Identitas node buat disisipkan ke teks prompt menggantikan `@sebutan`nya —
+ * Claude yang menjawab harus tahu ia sungguhan berjalan di mesin mana, bukan
+ * cuma melihat sebutan itu lenyap tanpa jejak. IP-nya self-report dari agent
+ * (lihat auth.ip di protocol); null kalau agent belum melapor atau memang
+ * tidak ketemu interface non-internal — fallback ke nama saja.
+ */
+function describeHost(h: HostRow): string {
+  return h.ip ? `${h.name} (${h.ip})` : h.name
+}
 
 /**
  * Direktori kerja default sebuah lane. `~` sengaja dibiarkan mentah: yang tahu
@@ -52,6 +63,9 @@ export function route(
   const used: Mention[] = []
   const unknown: string[] = []
   const offline = new Set<string>()
+  // index sebutan → teks pengganti (nama+IP node). Dibangun bareng loop di
+  // bawah karena resolusinya (host mana yang cocok) sudah dihitung di situ.
+  const resolved = new Map<number, string>()
 
   const take = (host: HostRow, asked: string | null): void => {
     if (!isOnline(host.id)) return void offline.add(host.name)
@@ -66,6 +80,11 @@ export function route(
 
     if (slug === MENTION_ALL) {
       used.push(m)
+      const online = live.filter((h) => isOnline(h.id))
+      resolved.set(
+        m.index,
+        online.length ? `semua node online (${online.map(describeHost).join(', ')})` : 'semua node',
+      )
       for (const h of live) take(h, cwd)
       continue
     }
@@ -79,6 +98,10 @@ export function route(
       continue
     }
     used.push(m)
+    // Biasanya satu host; kalau nama kembar (comment di atas fungsi ini),
+    // sebutan yang sama sengaja menyasar semuanya jadi teksnya ikut menyebut
+    // semuanya — bukan cuma salah satu yang seolah-olah "menang".
+    resolved.set(m.index, matched.map(describeHost).join(', '))
     for (const h of matched) take(h, cwd)
   }
 
@@ -86,6 +109,11 @@ export function route(
     targets: [...targets.values()],
     unknown,
     offline: [...offline],
-    text: stripMentions(text, used),
+    // Sebutan diganti identitas node sungguhan (nama+IP), bukan sekadar
+    // dibuang — supaya Claude yang menjawab tahu ia berjalan di mesin mana,
+    // dan (untuk prompt yang menyebut beberapa node) tahu juga node lain
+    // yang ikut disasar. Teksnya SAMA untuk semua target dalam satu fan-out
+    // ini — resolusi @sebutan tidak tergantung siapa penerimanya.
+    text: replaceMentions(text, used, (m) => resolved.get(m.index) ?? ''),
   }
 }

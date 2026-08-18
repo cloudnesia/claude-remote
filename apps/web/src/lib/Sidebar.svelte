@@ -122,7 +122,7 @@
   <div class="branding">
     <div class="app-info">
       <div class="app-name">claude-remote</div>
-      <div class="app-version">v0.11.0</div>
+      <div class="app-version">v0.12.0</div>
     </div>
     <div class="branding-right">
       <a
@@ -289,6 +289,23 @@
     {#if store.users.every(u => u.hosts.length === 0)}
       <button class="link" onclick={onpair}>hubungkan node pertama</button>
     {/if}
+
+    <header class="second">
+      <strong>Experimental</strong>
+    </header>
+
+    <div class="row" class:active={store.experimental === 'youtube-short'}>
+      <button
+        class="session"
+        onclick={() => {
+          store.experimental = 'youtube-short'
+          onclose()
+        }}
+      >
+        <span class="dot" style:background="#ff3b3b"></span>
+        <span class="title">YouTube Short</span>
+      </button>
+    </div>
   </div>
 
   <footer class="sidebar-footer">

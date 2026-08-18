@@ -7,6 +7,7 @@
   import PairDialog from '$lib/PairDialog.svelte'
   import NewSessionDialog from '$lib/NewSessionDialog.svelte'
   import GatewayDialog from '$lib/GatewayDialog.svelte'
+  import YoutubeShortPane from '$lib/YoutubeShortPane.svelte'
   import type { HostMeta } from '@company/protocol'
 
   let tokenInput = $state('')
@@ -84,7 +85,12 @@
         ☰ <span>Node & session</span>
       </button>
 
-      {#if store.open.length === 0}
+      {#if store.experimental === 'youtube-short'}
+        <!-- Panel eksperimental MENGGANTIKAN tab session sementara — tab
+             yang lagi terbuka tidak ditutup, cuma tidak dirender selagi
+             ini tampil. Nutup panel ini balik ke tab yang aktif sebelumnya. -->
+        <YoutubeShortPane onclose={() => (store.experimental = null)} />
+      {:else if store.open.length === 0}
         <div class="blank">
           Pilih session di kiri.
           <span class="tip">Klik session lain kapan saja — terbuka sebagai tab baru, yang lama tidak tertutup.</span>

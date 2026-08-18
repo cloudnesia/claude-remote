@@ -431,6 +431,31 @@ dari daftar session host supaya tidak muncul dua kali.
   prompt yang diam-diam cuma mendarat di sebagian node lebih berbahaya
   daripada yang gagal terang-terangan.
 
+### Rantai node berurutan (`@a @b`, bukan `@all`)
+
+Lebih dari satu sebutan EKSPLISIT dalam satu prompt (`"@a @b restart nginx"`)
+tidak lagi jalan sekaligus — sekarang bergantian sesuai urutan ketik: kirim
+ke `@a`, tunggu gilirannya selesai (`turn_end` sukses ATAU error fatal —
+lihat `onTurnEnd` di live.ts), baru kirim ke `@b`. `@all` **tidak pernah**
+lewat jalur ini — itu tetap broadcast paralel murni ke semua node online
+sekaligus, karena broadcast massal biasanya memang mau cepat, bukan gantian.
+
+- Jawaban langkah sebelumnya **disisipkan sebagai konteks** ke prompt
+  langkah berikutnya (`"Hasil dari mesinA (langkah sebelumnya): ...\n\n---\n\n<prompt asli>"`).
+  Ini yang membuat "ambil isi file di `@a`, jadikan parameter untuk `@b`"
+  bekerja tanpa hub perlu mengerti isi prompt-nya sama sekali — Claude di
+  `@b` yang membaca konteksnya dan memutuskan relevan atau tidak.
+- Kalau satu langkah **gagal** (turn berakhir bukan `stopReason: 'success'`,
+  atau exception fatal di tengah giliran), rantai **berhenti** — langkah
+  berikutnya tidak pernah dapat prompt. Node yang gilirannya tiba tapi
+  ternyata **offline** juga menghentikan rantai (daripada menunggu selamanya).
+  Keduanya dilaporkan lewat `denied`.
+- `interrupt` dan `delete_session` pada general session ikut membatalkan
+  rantai yang sedang berjalan, bukan cuma giliran yang sedang aktif.
+- Lane untuk SEMUA langkah dibikin di awal (bukan menyusul tiap giliran)
+  supaya langsung kelihatan di roster — cuma pengiriman prompt-nya yang
+  gantian.
+
 ### Otorisasi
 
 General session selalu privat: hanya owner yang melihatnya di roster, dan

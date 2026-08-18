@@ -35,6 +35,14 @@ export type Routing = {
   offline: string[]
   /** Prompt tanpa sebutan routing. Inilah yang dikirim ke tiap node. */
   text: string
+  /**
+   * `@all` dipakai di prompt ini. Penanda buat pemanggil (index.ts):
+   * `@all` tetap broadcast paralel ke semua node SEKALIGUS — beda dari
+   * beberapa sebutan eksplisit (`@a @b`), yang jalan berurutan (lihat §11
+   * PROTOCOL.md). Broadcast massal biasanya memang mau cepat/bersamaan,
+   * bukan gantian nunggu satu-satu.
+   */
+  usedAll: boolean
 }
 
 /**
@@ -63,6 +71,7 @@ export function route(
   const used: Mention[] = []
   const unknown: string[] = []
   const offline = new Set<string>()
+  let usedAll = false
   // index sebutan → teks pengganti (nama+IP node). Dibangun bareng loop di
   // bawah karena resolusinya (host mana yang cocok) sudah dihitung di situ.
   const resolved = new Map<number, string>()
@@ -80,6 +89,7 @@ export function route(
 
     if (slug === MENTION_ALL) {
       used.push(m)
+      usedAll = true
       const online = live.filter((h) => isOnline(h.id))
       resolved.set(
         m.index,
@@ -106,6 +116,9 @@ export function route(
   }
 
   return {
+    // Urutan targets mengikuti urutan MUNCUL sebutannya di teks (insertion
+    // order Map) — itulah yang dipakai index.ts sebagai urutan rantai node
+    // berurutan. Sengaja tidak diurutkan ulang.
     targets: [...targets.values()],
     unknown,
     offline: [...offline],
@@ -115,5 +128,6 @@ export function route(
     // yang ikut disasar. Teksnya SAMA untuk semua target dalam satu fan-out
     // ini — resolusi @sebutan tidak tergantung siapa penerimanya.
     text: replaceMentions(text, used, (m) => resolved.get(m.index) ?? ''),
+    usedAll,
   }
 }

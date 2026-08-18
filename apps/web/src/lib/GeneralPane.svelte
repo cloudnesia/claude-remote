@@ -163,9 +163,11 @@
     <div class="hint">
       <p>Satu prompt, beberapa laptop.</p>
       <p class="how">
-        Sebut node-nya di depan prompt: <code>@laptop-kerja @vps cek versi node</code>.
+        Sebut node-nya di depan prompt: <code>@laptop-kerja @vps cek versi node</code> —
+        keduanya jalan BERGANTIAN sesuai urutan ketik (bukan sekaligus), dan hasil
+        node sebelumnya ikut disisipkan sebagai konteks ke node berikutnya.
         <br />
-        <code>@all</code> menyasar semua node yang online, dan
+        <code>@all</code> beda: menyasar semua node online SEKALIGUS (paralel).
         <code>@node:/path/ke/project</code> menjalankannya di direktori tertentu
         (default: home).
       </p>

@@ -146,7 +146,7 @@
     {/if}
 
     {#if view?.loaded}
-      <Transcript messages={view.messages} live={view.live} />
+      <Transcript messages={view.messages} live={view.live ? [view.live] : []} />
     {:else}
       <div class="blank">memuat…</div>
     {/if}

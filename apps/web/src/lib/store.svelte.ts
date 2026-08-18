@@ -54,6 +54,15 @@ class Store {
   open = $state<string[]>([])
   /** Tab yang sedang ditampilkan di main. Null hanya kalau `open` kosong. */
   active = $state<string | null>(null)
+  /**
+   * Panel eksperimental yang lagi tampil di kanan — MENGGANTIKAN tab session
+   * sementara (lihat +page.svelte), bukan bagian dari sistem tab/`open`.
+   * Sengaja terpisah: ini bukan session, tidak ada subscribe/lifecycle hub
+   * sama sekali, jadi tidak masuk akal dipaksakan ke mekanisme `focus()`.
+   * `open`/`active` tetap utuh di baliknya — nutup panel ini kembali ke tab
+   * yang sedang aktif sebelumnya, bukan hilang.
+   */
+  experimental = $state<'youtube-short' | null>(null)
   views = $state<Record<string, SessionView>>({})
   generalViews = $state<Record<string, GeneralView>>({})
   notice = $state<string | null>(null)
@@ -151,6 +160,7 @@ class Store {
     this.connected = false
     this.open = []
     this.active = null
+    this.experimental = null
     this.views = {}
     this.users = []
     this.authError = reason
@@ -343,6 +353,12 @@ class Store {
    * ada"; bedanya cuma pada `wasOpen`.
    */
   focus(sessionId: string): void {
+    // Panel eksperimental (lihat `experimental` di atas) menggantikan tampilan
+    // tab SEMENTARA, bukan mengganti `active` — tanpa baris ini, klik session
+    // yang kebetulan sudah `active` dari sebelumnya (early return di bawah)
+    // tidak akan pernah menutup panel itu, dan sesi yang dipilih user tetap
+    // tidak terlihat.
+    this.experimental = null
     if (this.active === sessionId) return
     const wasOpen = this.open.includes(sessionId)
     if (!wasOpen) {

@@ -45,6 +45,20 @@
   const meta = $derived(store.meta(sessionId))
   const view = $derived(store.view(sessionId))
   const models = $derived(store.modelsFor(sessionId))
+
+  /**
+   * Jalan keluar manual dari tampilan "berpikir". Composer disembunyikan
+   * total selama status thinking (lihat catatan di markup) — kalau status-nya
+   * macet tidak pernah balik ke idle (mis. Stop gagal, atau `result` dari SDK
+   * tidak pernah sampai), tanpa ini pengguna terkunci total, tidak bisa
+   * ngetik apa pun sampai reload. Direset begitu status memang berubah,
+   * supaya giliran berikutnya tetap mulai dari tampilan berpikir seperti
+   * biasa, bukan permanen ter-force.
+   */
+  let forceComposer = $state(false)
+  $effect(() => {
+    if (meta?.status !== 'thinking') forceComposer = false
+  })
   /** Non-null kalau yang menunggu bukan izin tool, tapi pertanyaan buat owner. */
   const asking = $derived(
     view?.pending ? askQuestions(view.pending.name, view.pending.input) : null,
@@ -148,8 +162,15 @@
       diganti indikator tengah + tombol stop, bukan disembunyikan sebagian.
       Trade-off yang disadari: prompt susulan tidak bisa diantre sambil giliran
       sebelumnya masih jalan (dulu bisa, lewat textarea yang tetap aktif).
+
+      `forceComposer` adalah jalan keluar manual: kalau status macet di
+      thinking (Stop gagal, atau event akhir dari SDK tidak pernah sampai),
+      composer yang disembunyikan total ini bisa mengunci pengguna — tidak
+      bisa ngetik apa pun sampai reload. Tombol kecil di bawah Stop selalu
+      tersedia untuk memaksa composer muncul lagi tanpa menunggu status
+      berubah.
     -->
-    {#if meta.status === 'thinking'}
+    {#if meta.status === 'thinking' && !forceComposer}
       <div class="thinking-bar">
         <span class="thinking-text">
           Berpikir
@@ -161,6 +182,9 @@
           </button>
         {/if}
       </div>
+      <button type="button" class="force-composer" onclick={() => (forceComposer = true)}>
+        Composer tidak muncul lagi? Tampilkan paksa
+      </button>
     {:else}
       <div class="toolbar">
         {#if view?.canPrompt && models.length}
@@ -569,6 +593,22 @@
   .stop:hover {
     background: #3a1c19;
     border-color: #e5534b;
+  }
+  .force-composer {
+    display: block;
+    width: 100%;
+    background: none;
+    border: none;
+    color: #4b515c;
+    font: inherit;
+    font-size: 11px;
+    text-align: center;
+    padding: 0 16px 12px;
+    cursor: pointer;
+  }
+  .force-composer:hover {
+    color: #9aa3b2;
+    text-decoration: underline;
   }
 
   /* Mobile responsive */

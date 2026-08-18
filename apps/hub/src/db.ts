@@ -113,6 +113,11 @@ addColumn('hosts', 'revoked', 'INTEGER NOT NULL DEFAULT 0')
 addColumn('hosts', 'gateway_url', 'TEXT')
 // NULL = session biasa. Terisi = lane milik sebuah general session.
 addColumn('sessions', 'general_id', 'TEXT')
+// IPv4 lokal laptop, dilaporkan agent sendiri saat auth (lihat primaryIp()
+// di apps/agent/src/index.ts — os.networkInterfaces()). NULL kalau tidak
+// ketemu interface non-internal. Dipakai general.ts buat mengganti @sebutan
+// dengan identitas node sungguhan sebelum teksnya sampai ke Claude.
+addColumn('hosts', 'ip', 'TEXT')
 db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_general ON sessions(general_id)')
 
 // ------------------------------------------------------------------ queries
@@ -156,7 +161,7 @@ const q = {
   deleteSession: db.prepare('DELETE FROM sessions WHERE id = ?'),
   setClaudeSid: db.prepare('UPDATE sessions SET claude_session_id = ? WHERE id = ?'),
   setAcked: db.prepare('UPDATE sessions SET acked_seq = ? WHERE id = ? AND acked_seq < ?'),
-  seenHost: db.prepare('UPDATE hosts SET last_seen = ?, platform = ?, name = ? WHERE id = ?'),
+  seenHost: db.prepare('UPDATE hosts SET last_seen = ?, platform = ?, name = ?, ip = ? WHERE id = ?'),
   insertMessage: db.prepare(`
     INSERT OR REPLACE INTO messages (session_id, seq, id, role, blocks, ts)
     VALUES (?, ?, ?, ?, ?, ?)`),
@@ -174,6 +179,8 @@ export type HostRow = {
   revoked: number
   /** Base URL gateway, atau null kalau host memakai login Claude lokalnya. */
   gateway_url: string | null
+  /** IPv4 lokal laptop, dilaporkan agent sendiri. Null kalau belum/tidak ada. */
+  ip: string | null
   last_seen: number
 }
 export type SessionRow = {
@@ -208,7 +215,7 @@ export const sessionById = (id: string) => (q.sessionById.get(id) as SessionRow)
 export const hostsOf = (ownerId: string) => q.hostsOf.all(ownerId) as HostRow[]
 
 export function createHost(
-  h: Omit<HostRow, 'last_seen' | 'models' | 'revoked' | 'gateway_url'>,
+  h: Omit<HostRow, 'last_seen' | 'models' | 'revoked' | 'gateway_url' | 'ip'>,
 ): void {
   db.prepare(
     'INSERT INTO hosts (id, owner_id, name, platform, token, last_seen) VALUES (?, ?, ?, ?, ?, 0)',
@@ -307,8 +314,8 @@ export function resumeMapFor(hostId: string): Record<string, number> {
   return Object.fromEntries(rows.map((r) => [r.id, r.acked_seq]))
 }
 
-export function markHostSeen(hostId: string, name: string, platform: string): void {
-  q.seenHost.run(Date.now(), platform, name, hostId)
+export function markHostSeen(hostId: string, name: string, platform: string, ip: string | null): void {
+  q.seenHost.run(Date.now(), platform, name, ip, hostId)
 }
 
 export function createSession(

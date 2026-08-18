@@ -2,10 +2,21 @@ import {
   MENTION_ALL,
   nodeSlug,
   parseMentions,
-  stripMentions,
+  replaceMentions,
   type Mention,
 } from '@company/protocol'
 import type { HostRow } from './db.ts'
+
+/**
+ * Identitas node buat disisipkan ke teks prompt menggantikan `@sebutan`nya —
+ * Claude yang menjawab harus tahu ia sungguhan berjalan di mesin mana, bukan
+ * cuma melihat sebutan itu lenyap tanpa jejak. IP-nya self-report dari agent
+ * (lihat auth.ip di protocol); null kalau agent belum melapor atau memang
+ * tidak ketemu interface non-internal — fallback ke nama saja.
+ */
+function describeHost(h: HostRow): string {
+  return h.ip ? `${h.name} (${h.ip})` : h.name
+}
 
 /**
  * Direktori kerja default sebuah lane. `~` sengaja dibiarkan mentah: yang tahu
@@ -24,6 +35,14 @@ export type Routing = {
   offline: string[]
   /** Prompt tanpa sebutan routing. Inilah yang dikirim ke tiap node. */
   text: string
+  /**
+   * `@all` dipakai di prompt ini. Penanda buat pemanggil (index.ts):
+   * `@all` tetap broadcast paralel ke semua node SEKALIGUS — beda dari
+   * beberapa sebutan eksplisit (`@a @b`), yang jalan berurutan (lihat §11
+   * PROTOCOL.md). Broadcast massal biasanya memang mau cepat/bersamaan,
+   * bukan gantian nunggu satu-satu.
+   */
+  usedAll: boolean
 }
 
 /**
@@ -52,6 +71,10 @@ export function route(
   const used: Mention[] = []
   const unknown: string[] = []
   const offline = new Set<string>()
+  let usedAll = false
+  // index sebutan → teks pengganti (nama+IP node). Dibangun bareng loop di
+  // bawah karena resolusinya (host mana yang cocok) sudah dihitung di situ.
+  const resolved = new Map<number, string>()
 
   const take = (host: HostRow, asked: string | null): void => {
     if (!isOnline(host.id)) return void offline.add(host.name)
@@ -66,6 +89,12 @@ export function route(
 
     if (slug === MENTION_ALL) {
       used.push(m)
+      usedAll = true
+      const online = live.filter((h) => isOnline(h.id))
+      resolved.set(
+        m.index,
+        online.length ? `semua node online (${online.map(describeHost).join(', ')})` : 'semua node',
+      )
       for (const h of live) take(h, cwd)
       continue
     }
@@ -79,13 +108,26 @@ export function route(
       continue
     }
     used.push(m)
+    // Biasanya satu host; kalau nama kembar (comment di atas fungsi ini),
+    // sebutan yang sama sengaja menyasar semuanya jadi teksnya ikut menyebut
+    // semuanya — bukan cuma salah satu yang seolah-olah "menang".
+    resolved.set(m.index, matched.map(describeHost).join(', '))
     for (const h of matched) take(h, cwd)
   }
 
   return {
+    // Urutan targets mengikuti urutan MUNCUL sebutannya di teks (insertion
+    // order Map) — itulah yang dipakai index.ts sebagai urutan rantai node
+    // berurutan. Sengaja tidak diurutkan ulang.
     targets: [...targets.values()],
     unknown,
     offline: [...offline],
-    text: stripMentions(text, used),
+    // Sebutan diganti identitas node sungguhan (nama+IP), bukan sekadar
+    // dibuang — supaya Claude yang menjawab tahu ia berjalan di mesin mana,
+    // dan (untuk prompt yang menyebut beberapa node) tahu juga node lain
+    // yang ikut disasar. Teksnya SAMA untuk semua target dalam satu fan-out
+    // ini — resolusi @sebutan tidak tergantung siapa penerimanya.
+    text: replaceMentions(text, used, (m) => resolved.get(m.index) ?? ''),
+    usedAll,
   }
 }

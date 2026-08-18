@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { hostname, platform } from 'node:os'
+import { hostname, networkInterfaces, platform } from 'node:os'
 import WebSocket from 'ws'
 import { CLOSE, PROTOCOL_VERSION, safeParse, type AgentToHub, type HubToAgent } from '@company/protocol'
 import { SessionRunner } from './session.ts'
@@ -19,6 +19,26 @@ const HUB_HTTP = HUB.replace(/^ws/, 'http')
 // HOST_TOKEN dari env tetap didukung untuk dev/CI; jalur normalnya pairing.
 const TOKEN = process.env.HOST_TOKEN ?? cfg?.hostToken ?? ''
 const HOST_NAME = process.env.HOST_NAME ?? cfg?.hostName ?? hostname()
+
+/**
+ * IPv4 lokal laptop ini, dilaporkan sendiri saat auth — bukan yang dilihat
+ * hub dari koneksi masuk (itu bisa jadi alamat reverse proxy/NAT, tidak
+ * berguna buat identitas node). Dipakai hub mengganti `@sebutan` di prompt
+ * general session dengan identitas node sungguhan (lihat general.ts).
+ *
+ * Ambil interface non-internal pertama secara berurutan nama supaya hasilnya
+ * stabil antar restart, bukan sekadar "yang pertama ketemu" yang bisa beda
+ * urutan tiap kali proses jalan.
+ */
+function primaryIp(): string | null {
+  const nets = networkInterfaces()
+  for (const name of Object.keys(nets).sort()) {
+    for (const net of nets[name] ?? []) {
+      if (net.family === 'IPv4' && !net.internal) return net.address
+    }
+  }
+  return null
+}
 
 const runners = new Map<string, SessionRunner>()
 let ws: WebSocket | null = null
@@ -99,7 +119,14 @@ function connect(): void {
   ws.on('open', () => {
     backoff = 1000
     console.log(`[agent] terhubung ke ${HUB} sebagai ${HOST_NAME}`)
-    send({ t: 'auth', v: PROTOCOL_VERSION, hostName: HOST_NAME, platform: platform(), agentVersion: VERSION })
+    send({
+      t: 'auth',
+      v: PROTOCOL_VERSION,
+      hostName: HOST_NAME,
+      platform: platform(),
+      agentVersion: VERSION,
+      ip: primaryIp(),
+    })
   })
 
   ws.on('message', (raw) => {

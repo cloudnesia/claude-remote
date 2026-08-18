@@ -7,6 +7,15 @@ import {
 } from '@company/protocol'
 import { ackSeq, persistMessage } from './db.ts'
 
+/** Gabungan semua blok teks satu Message — dipakai buat menyalurkan hasil
+ * satu langkah rantai node berurutan (general.ts) ke langkah berikutnya. */
+function textOf(m: Message): string {
+  return m.blocks
+    .filter((b): b is { kind: 'text'; text: string } => b.kind === 'text')
+    .map((b) => b.text)
+    .join('\n\n')
+}
+
 /** Jeda coalescing hub→browser. Lihat catatan di `enqueue()`. */
 const FLUSH_MS = 60
 
@@ -47,6 +56,19 @@ function durable(sessionId: string, seq: number): void {
 let notifyStatus: (sessionId: string) => void = () => {}
 export const onStatusChange = (fn: typeof notifyStatus): void => {
   notifyStatus = fn
+}
+
+/**
+ * Satu giliran life-cycle penuh: dari `turn_start` sampai selesai, sukses
+ * ATAU gagal. Dipakai general.ts buat rantai node berurutan (§11 PROTOCOL.md)
+ * — begitu langkah sekarang selesai, lanjut ke node berikutnya dengan hasil
+ * langkah ini disisipkan sebagai konteks; kalau gagal, rantai berhenti.
+ * Tidak peduli general session atau bukan — pemanggilnya yang menyaring.
+ */
+export type TurnOutcome = { sessionId: string; ok: boolean; text: string }
+let notifyTurnEnd: (o: TurnOutcome) => void = () => {}
+export const onTurnEnd = (fn: typeof notifyTurnEnd): void => {
+  notifyTurnEnd = fn
 }
 
 function get(sessionId: string): LiveSession {
@@ -120,7 +142,8 @@ export function ingest(frame: Frame): void {
       s.status = 'thinking'
       break
 
-    case 'turn_end':
+    case 'turn_end': {
+      const text = s.live ? textOf(s.live) : ''
       if (s.live) {
         persistMessage(frame.sessionId, frame.seq, s.live)
         s.live = null
@@ -129,7 +152,9 @@ export function ingest(frame: Frame): void {
       // Ack HANYA di batas giliran — lihat PROTOCOL.md §3. Meng-ack di tengah
       // giliran akan membuat reconnect menghasilkan transcript terpotong.
       durable(frame.sessionId, frame.seq)
+      notifyTurnEnd({ sessionId: frame.sessionId, ok: ev.stopReason === 'success', text })
       break
+    }
 
     case 'approval_req':
       s.pendingApproval = { reqId: ev.reqId, name: ev.name, input: ev.input }
@@ -152,9 +177,14 @@ export function ingest(frame: Frame): void {
       if (s.live) applyEv(s.live, ev)
       if (ev.fatal && s.live) {
         // Simpan yang sempat terkumpul; lebih baik giliran terpotong daripada hilang.
+        const text = textOf(s.live)
         persistMessage(frame.sessionId, frame.seq, s.live)
         s.live = null
         durable(frame.sessionId, frame.seq)
+        // Exception di tengah pump() agent TIDAK selalu diikuti `turn_end` —
+        // tanpa notifikasi di sini, rantai node berurutan menunggu giliran
+        // yang tidak akan pernah datang, macet permanen.
+        notifyTurnEnd({ sessionId: frame.sessionId, ok: false, text })
       }
       break
 

@@ -7,6 +7,7 @@ import {
   safeParse,
   validateAttachments,
   type AgentToHub,
+  type Attachment,
   type BrowserToHub,
   type HubToAgent,
   type HubToBrowser,
@@ -22,6 +23,7 @@ import {
   markHostOnline,
   onAck,
   onStatusChange,
+  onTurnEnd,
   snapshotOf,
   statusOf,
   subscribe,
@@ -201,6 +203,111 @@ function ensureLane(g: db.GeneralRow, host: db.HostRow, cwd: string): db.Session
   return lane
 }
 
+// ------------------------------------------------------- rantai node berurutan
+
+/**
+ * "@a @b @c prompt" — dulu ketiganya dapat prompt yang sama SEKALIGUS
+ * (paralel). Sekarang, kalau sebutannya eksplisit (bukan lewat `@all`),
+ * mereka jalan BERGANTIAN sesuai urutan ketik: kirim ke node pertama, tunggu
+ * gilirannya selesai, baru kirim ke berikutnya — dengan jawaban node
+ * sebelumnya disisipkan sebagai konteks (lihat `stepText`). `@all` TIDAK
+ * pernah lewat sini — itu tetap broadcast paralel murni (lihat pemanggilnya
+ * di case 'prompt').
+ */
+type ChainStep = { host: db.HostRow; cwd: string }
+type Chain = {
+  generalId: string
+  steps: ChainStep[]
+  index: number
+  originalText: string
+  attachments?: Attachment[]
+  /** Jawaban langkah sebelumnya, disisipkan sebagai konteks ke langkah
+   * berikutnya — ini yang membuat "ambil isi file di @a, jadikan parameter
+   * buat @b" bekerja tanpa hub perlu mengerti isi prompt-nya sama sekali. */
+  priorOutput: string | null
+}
+const chains = new Map<string, Chain>() // key: generalId — satu rantai aktif per general
+
+function stepText(chain: Chain): string {
+  if (!chain.priorOutput) return chain.originalText
+  const prev = chain.steps[chain.index - 1]!
+  return `Hasil dari ${prev.host.name} (langkah sebelumnya dalam urutan ini):\n${chain.priorOutput}\n\n---\n\n${chain.originalText}`
+}
+
+function runChainStep(chain: Chain): void {
+  const step = chain.steps[chain.index]
+  const g = db.generalById(chain.generalId)
+  if (!step || !g) return void chains.delete(chain.generalId)
+
+  // Node gilirannya offline pas ditunggu — jangan macet selamanya menunggu
+  // sesuatu yang tidak akan pernah datang.
+  if (!isOnline(step.host.id)) {
+    chains.delete(chain.generalId)
+    for (const c of browsers) {
+      if (c.generals.has(chain.generalId)) {
+        sendBrowser(c, {
+          t: 'denied',
+          action: 'prompt',
+          reason: `rantai berhenti — ${step.host.name} offline gantian gilirannya`,
+        })
+      }
+    }
+    return
+  }
+
+  const lane = ensureLane(g, step.host, step.cwd)
+  if (!lane) return void chains.delete(chain.generalId)
+
+  sendAgent(step.host.id, {
+    t: 'prompt',
+    sessionId: lane.id,
+    text: stepText(chain),
+    // Lampiran cuma ikut langkah pertama — mengulang byte yang sama ke tiap
+    // node di rantai tidak berguna dan boros.
+    attachments: chain.index === 0 ? chain.attachments : undefined,
+  })
+  db.touchGeneral(chain.generalId)
+}
+
+// Satu-satunya jalur yang menggerakkan rantai maju: dipicu tiap kali SATU
+// giliran (session mana pun, general atau bukan) selesai. Bukan cuma
+// turn_end sukses — juga error fatal di tengah giliran (lihat live.ts),
+// supaya rantai tidak menunggu selamanya untuk sinyal yang tidak akan datang.
+onTurnEnd(({ sessionId, ok, text }) => {
+  const s = db.sessionById(sessionId)
+  const generalId = s?.general_id
+  if (!generalId) return
+  const chain = chains.get(generalId)
+  if (!chain) return
+  const step = chain.steps[chain.index]
+  // Pastikan frame ini memang milik LANGKAH SEKARANG di rantai ini — bukan
+  // giliran lama/tidak terkait yang kebetulan session-nya sama.
+  if (!step || s.host_id !== step.host.id || s.cwd !== step.cwd) return
+
+  if (!ok) {
+    chains.delete(generalId)
+    for (const c of browsers) {
+      if (c.generals.has(generalId)) {
+        sendBrowser(c, {
+          t: 'denied',
+          action: 'prompt',
+          reason: `rantai berhenti — giliran ${step.host.name} gagal`,
+        })
+      }
+    }
+    broadcastRoster()
+    return
+  }
+
+  chain.priorOutput = text
+  chain.index++
+  if (chain.index >= chain.steps.length) {
+    chains.delete(generalId)
+    return
+  }
+  runChainStep(chain)
+})
+
 // -------------------------------------------------------------------- http
 
 const server = createServer(async (req, res) => {
@@ -323,7 +430,7 @@ function onAgent(ws: WebSocket, host: db.HostRow): void {
     switch (m.t) {
       case 'auth': {
         if (m.v !== PROTOCOL_VERSION) return ws.close(CLOSE.BAD_VERSION, 'protocol mismatch')
-        db.markHostSeen(host.id, m.hostName, m.platform)
+        db.markHostSeen(host.id, m.hostName, m.platform, m.ip ?? null)
 
         // resumeFrom = titik tertinggi yang hub sudah tahu, bukan sekadar yang
         // durable. Ini menangani dua arah kegagalan sekaligus: hub yang restart
@@ -732,18 +839,38 @@ function handleGeneral(conn: BrowserConn, g: db.GeneralRow, m: BrowserToHub): vo
         return sendBrowser(conn, { t: 'denied', action: 'prompt', reason: 'prompt kosong' })
       }
 
-      for (const { host, cwd } of r.targets) {
-        const lane = ensureLane(g, host, cwd)
-        if (lane) {
-          sendAgent(host.id, {
-            t: 'prompt',
-            sessionId: lane.id,
-            text: r.text,
-            attachments: m.attachments,
-          })
+      // @a @b eksplisit (bukan @all) dengan lebih dari satu target: jalan
+      // BERGANTIAN sesuai urutan ketik, bukan sekaligus — lihat blok rantai
+      // node berurutan di atas (dekat ensureLane) untuk alasannya.
+      if (!r.usedAll && r.targets.length > 1) {
+        const steps = r.targets.map(({ host, cwd }) => ({ host, cwd }))
+        // Lane SEMUA langkah dibikin sekarang (bukan menyusul tiap giliran)
+        // supaya langsung kelihatan di node-strip web — cuma prompt-nya yang
+        // menyusul gantian.
+        for (const { host, cwd } of steps) ensureLane(g, host, cwd)
+        chains.set(g.id, {
+          generalId: g.id,
+          steps,
+          index: 0,
+          originalText: r.text,
+          attachments: m.attachments,
+          priorOutput: null,
+        })
+        runChainStep(chains.get(g.id)!)
+      } else {
+        for (const { host, cwd } of r.targets) {
+          const lane = ensureLane(g, host, cwd)
+          if (lane) {
+            sendAgent(host.id, {
+              t: 'prompt',
+              sessionId: lane.id,
+              text: r.text,
+              attachments: m.attachments,
+            })
+          }
         }
+        db.touchGeneral(g.id)
       }
-      db.touchGeneral(g.id)
 
       // Yang dilewati tetap dilaporkan: prompt yang diam-diam cuma mendarat di
       // sebagian node lebih berbahaya daripada yang gagal terang-terangan.
@@ -759,11 +886,16 @@ function handleGeneral(conn: BrowserConn, g: db.GeneralRow, m: BrowserToHub): vo
     }
 
     case 'interrupt': {
+      // Stop juga menghentikan rantai — kalau tidak, giliran yang sedang
+      // di-interrupt akan tetap memicu langkah berikutnya begitu turn_end
+      // (atau error) sampai, seolah Stop tidak sungguhan berhenti.
+      chains.delete(g.id)
       for (const lane of db.lanesOf(g.id)) sendAgent(lane.host_id, { t: 'interrupt', sessionId: lane.id })
       return
     }
 
     case 'delete_session': {
+      chains.delete(g.id)
       // Sama seperti delete_session biasa: agent diberi tahu duluan supaya
       // proses tiap lane berhenti, lepas dari host-nya online atau tidak.
       for (const lane of db.lanesOf(g.id)) {

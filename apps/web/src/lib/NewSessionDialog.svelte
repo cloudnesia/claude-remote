@@ -92,6 +92,11 @@
     left: 50%;
     transform: translate(-50%, -50%);
     width: 460px;
+    /* Sama seperti PairDialog: tanpa ini, di HP modal 460px meluber dari
+       viewport dan tombol "Buat di sini"/daftar folder jadi tidak bisa
+       disentuh — bukan cuma kepotong tampilannya, karena body sekarang
+       overflow:hidden. Ini yang bikin "tidak bisa pilih folder" di mobile. */
+    max-width: calc(100vw - 24px);
     max-height: 80vh;
     display: flex;
     flex-direction: column;
@@ -99,6 +104,7 @@
     border: 1px solid #2b303a;
     border-radius: 10px;
     padding: 20px;
+    box-sizing: border-box;
   }
   h2 {
     margin: 0 0 14px;

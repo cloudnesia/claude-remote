@@ -6,10 +6,16 @@
     onpair,
     onnew,
     ongateway,
+    open,
+    onclose,
   }: {
     onpair: () => void
     onnew: (host: HostMeta) => void
     ongateway: (host: HostMeta) => void
+    /** Cuma berlaku di mobile (lihat @media di style) — sidebar di desktop
+     * selalu terlihat, prop ini tidak berpengaruh sama sekali di sana. */
+    open: boolean
+    onclose: () => void
   } = $props()
 
   /** Host yang menunggu konfirmasi lepas. Dua langkah, bukan modal. */
@@ -100,23 +106,40 @@
 
 </script>
 
-<aside>
+{#if open}
+  <!-- Cuma dirender (dan cuma kelihatan, lihat @media) kalau open — tap di
+       luar panel buat menutup, standar pola drawer mobile. -->
+  <div
+    class="backdrop"
+    role="button"
+    tabindex="-1"
+    onclick={onclose}
+    onkeydown={(e) => e.key === 'Escape' && onclose()}
+  ></div>
+{/if}
+
+<aside class:mobile-open={open}>
   <div class="branding">
     <div class="app-info">
       <div class="app-name">claude-remote</div>
-      <div class="app-version">v0.10.0</div>
+      <div class="app-version">v0.11.0</div>
     </div>
-    <a
-      href="https://github.com/yourusername/claude-remote"
-      target="_blank"
-      rel="noopener noreferrer"
-      class="github-link"
-      title="View source on GitHub"
-    >
-      <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-      </svg>
-    </a>
+    <div class="branding-right">
+      <a
+        href="https://github.com/yourusername/claude-remote"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="github-link"
+        title="View source on GitHub"
+      >
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+      </a>
+      <button class="close-drawer" onclick={onclose} title="Tutup panel" aria-label="Tutup panel">
+        ✕
+      </button>
+    </div>
   </div>
 
   <div class="sidebar-content">
@@ -135,7 +158,13 @@
     {#each store.myGenerals as g (g.id)}
       {@const st = generalStatus(g)}
       <div class="row" class:active={store.active === g.id}>
-        <button class="session general" onclick={() => store.focus(g.id)}>
+        <button
+          class="session general"
+          onclick={() => {
+            store.focus(g.id)
+            onclose()
+          }}
+        >
           <span class="dot" style:background={dot[st]}></span>
           <span class="title">{g.title}</span>
           {#if st === 'waiting'}<span class="badge">izin</span>{/if}
@@ -224,7 +253,13 @@
 
         {#each host.sessions as s (s.id)}
           <div class="row" class:active={store.active === s.id}>
-            <button class="session" onclick={() => store.focus(s.id)}>
+            <button
+              class="session"
+              onclick={() => {
+                store.focus(s.id)
+                onclose()
+              }}
+            >
               <span class="dot" style:background={dot[s.status]}></span>
               <span class="title">{s.title}</span>
               {#if s.status === 'waiting'}<span class="badge">izin</span>{/if}
@@ -325,6 +360,31 @@
   }
   .github-link svg {
     display: block;
+  }
+  .branding-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  /* Cuma tombol drawer di mobile — desktop tidak pernah butuh menutup
+     sidebar-nya sendiri. Lihat @media untuk yang benar-benar menampilkannya. */
+  .close-drawer {
+    display: none;
+    background: none;
+    border: none;
+    color: #6b7280;
+    font-size: 16px;
+    line-height: 1;
+    padding: 6px;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .close-drawer:hover {
+    color: #e6e9ef;
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .backdrop {
+    display: none;
   }
   header {
     display: flex;
@@ -613,12 +673,42 @@
 
   /* Mobile responsive */
   @media (max-width: 768px) {
+    /* Sidebar jadi drawer: disembunyikan di luar viewport secara default,
+       digeser masuk dari kiri saat `open` — bukan lagi strip permanen
+       max-height:200px yang selalu makan tempat di atas chat. */
     aside {
-      width: 100%;
-      max-height: 200px;
-      border-right: none;
-      border-bottom: 1px solid #23272f;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 85vw;
+      max-width: 320px;
+      /* Fallback duluan, browser yang kenal dvh menimpanya — sama seperti
+         pola di +page.svelte (.app/.login), lihat catatan di sana. */
+      height: 100vh;
+      height: 100dvh;
+      max-height: none;
+      z-index: 30;
+      transform: translateX(-100%);
+      transition: transform 0.22s ease;
+      border-right: 1px solid #23272f;
+      border-bottom: none;
+      box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
       flex-shrink: 0;
+    }
+    aside.mobile-open {
+      transform: translateX(0);
+    }
+    .backdrop {
+      display: block;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 25;
+    }
+    .close-drawer {
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     .branding {
       padding: 10px 12px 8px;

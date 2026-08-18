@@ -14,6 +14,9 @@
   let pairing = $state(false)
   let newFor = $state<HostMeta | null>(null)
   let gatewayFor = $state<HostMeta | null>(null)
+  /** Drawer sidebar di mobile — tidak berpengaruh apa-apa di desktop (lihat
+   * @media di Sidebar.svelte), sidebar di sana selalu terlihat seperti biasa. */
+  let mobileSidebarOpen = $state(false)
 
   $effect(() => {
     // Token dev: dari ?token= sekali, lalu disimpan. Login user sungguhan
@@ -65,9 +68,22 @@
       onpair={() => (pairing = true)}
       onnew={(h) => (newFor = h)}
       ongateway={(h) => (gatewayFor = h)}
+      open={mobileSidebarOpen}
+      onclose={() => (mobileSidebarOpen = false)}
     />
 
     <main>
+      <!-- Cuma tampil di mobile (lihat @media) — sidebar sekarang drawer
+           tersembunyi di sana, jadi butuh pemicu yang selalu kelihatan
+           terlepas dari tab mana pun yang sedang aktif. -->
+      <button
+        class="mobile-sidebar-toggle"
+        onclick={() => (mobileSidebarOpen = true)}
+        aria-label="Buka daftar node & session"
+      >
+        ☰ <span>Node & session</span>
+      </button>
+
       {#if store.open.length === 0}
         <div class="blank">
           Pilih session di kiri.
@@ -150,6 +166,11 @@
     justify-content: center;
     gap: 10px;
     color: #4b515c;
+  }
+  /* Cuma kelihatan di mobile (lihat @media) — sidebar di sana jadi drawer
+     tersembunyi, jadi butuh pemicu yang selalu ada di area chat. */
+  .mobile-sidebar-toggle {
+    display: none;
   }
   .tip {
     font-size: 12px;
@@ -242,6 +263,25 @@
     }
     .tip {
       font-size: 11px;
+    }
+    .mobile-sidebar-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: none;
+      width: 100%;
+      padding: 10px 14px;
+      background: #14171c;
+      border: none;
+      border-bottom: 1px solid #23272f;
+      color: #9aa3b2;
+      font: inherit;
+      font-size: 13px;
+      text-align: left;
+      cursor: pointer;
+    }
+    .mobile-sidebar-toggle:active {
+      background: #1b1f26;
     }
     .login form {
       width: 90%;

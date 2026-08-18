@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { askQuestions, nodeSlug, type LaneMeta } from '@company/protocol'
+  import { askQuestions, nodeSlug, type LaneMeta, type Message } from '@company/protocol'
   import AskQuestions from './AskQuestions.svelte'
   import AttachChips from './AttachChips.svelte'
   import { filesToAttachments, type PendingAttachment } from './attachments.ts'
@@ -86,6 +86,59 @@
    */
   const mentionOf = (l: LaneMeta) =>
     l.cwd === '~' ? `@${nodeSlug(l.hostName)}` : `@${nodeSlug(l.hostName)}:${l.cwd}`
+
+  function textOf(m: Message): string {
+    const b = m.blocks.find((x): x is Extract<(typeof m.blocks)[number], { kind: 'text' }> => x.kind === 'text')
+    return b?.text ?? ''
+  }
+
+  /**
+   * Dulu tiap node dapat kolomnya sendiri (satu prompt → N transcript
+   * berdampingan). Sekarang digabung jadi SATU percakapan, kronologis,
+   * dengan balasan tiap node ditandai lewat `labelFor` di Transcript —
+   * lebih terasa seperti satu chat, bukan N chat kebetulan sejajar.
+   *
+   * Dua hal yang perlu dijaga di sini:
+   * 1. Prompt user yang sama dikirim ke SEMUA lane target dalam satu
+   *    submit — kalau tidak di-dedup, prompt itu muncul N kali berturut-
+   *    turut di transcript gabungan. Di-dedup lewat teks + jendela waktu
+   *    (bukan id: seq per-lane independen, jadi kalimat yang sama bisa
+   *    kebetulan lain waktu bukan bagian dari fan-out yang sama).
+   * 2. `Message.id` unik cuma DALAM satu lane (seq per-session). Dua lane
+   *    yang sama-sama baru mulai bisa sama-sama punya id `u_1` — tanpa
+   *    prefix sessionId, itu tabrakan key di {#each} Transcript.
+   */
+  const merged = $derived.by(() => {
+    const messages: Message[] = []
+    const live: Message[] = []
+    const labels = new Map<string, string>()
+    const seenUser: { text: string; ts: number }[] = []
+
+    for (const lane of lanes) {
+      const v = store.view(lane.sessionId)
+      if (!v) continue
+      const label = laneLabel(lane)
+
+      for (const m of v.messages) {
+        if (m.role === 'user') {
+          const text = textOf(m)
+          if (seenUser.some((u) => u.text === text && Math.abs(u.ts - m.ts) < 5000)) continue
+          seenUser.push({ text, ts: m.ts })
+        }
+        const id = `${lane.sessionId}:${m.id}`
+        if (m.role === 'assistant') labels.set(id, label)
+        messages.push({ ...m, id })
+      }
+      if (v.live) {
+        const id = `${lane.sessionId}:${v.live.id}`
+        labels.set(id, label)
+        live.push({ ...v.live, id })
+      }
+    }
+
+    messages.sort((a, b) => a.ts - b.ts)
+    return { messages, live, labels }
+  })
 </script>
 
 <section>
@@ -131,72 +184,87 @@
       {/if}
     </div>
   {:else}
-    <div class="lanes">
+    <!-- Status ringkas per node — dulu ini header tiap kolom, sekarang satu
+         strip di atas satu transcript gabungan (lihat `merged` di script). -->
+    <div class="node-strip">
       {#each lanes as lane (lane.sessionId)}
         {@const v = store.view(lane.sessionId)}
-        {@const asking = v?.pending ? askQuestions(v.pending.name, v.pending.input) : null}
-        <div class="lane">
-          <div class="lanehead">
-            <span class="dot" style:background={dot[lane.status]}></span>
-            <span class="lanename" title={lane.cwd}>{laneLabel(lane)}</span>
-            <span class="lanestatus">{statusLabel[lane.status] ?? lane.status}</span>
-            {#if v}
-              <button
-                class="auto"
-                class:on={v.auto}
-                onclick={() => store.setAuto(lane.sessionId, !v.auto)}
-                title={v.auto
-                  ? 'Auto mode AKTIF di node ini — tool jalan tanpa minta izin.'
-                  : 'Auto mode mati — tiap tool minta izin dulu.'}
-              >
-                auto {v.auto ? 'on' : 'off'}
-              </button>
-            {/if}
-          </div>
-
-          {#if v?.pending && asking}
-            {#key v.pending.reqId}
-              <AskQuestions
-                questions={asking}
-                onSubmit={(answers) =>
-                  store.approve(lane.sessionId, v!.pending!.reqId, 'allow', answers)}
-                onSkip={() => store.approve(lane.sessionId, v!.pending!.reqId, 'deny')}
-              />
-            {/key}
-          {:else if v?.pending}
-            <div class="approval">
-              <div class="ask">
-                <div class="asktitle">minta izin jalan</div>
-                <ToolCall
-                  block={{
-                    kind: 'tool',
-                    id: v.pending.reqId,
-                    name: v.pending.name,
-                    input: v.pending.input,
-                    done: true,
-                  }}
-                  compact
-                />
-              </div>
-              <div class="acts">
-                <button class="deny" onclick={() => store.approve(lane.sessionId, v.pending!.reqId, 'deny')}>
-                  Tolak
-                </button>
-                <button class="allow" onclick={() => store.approve(lane.sessionId, v.pending!.reqId, 'allow')}>
-                  Izinkan
-                </button>
-              </div>
-            </div>
-          {/if}
-
-          {#if v?.loaded}
-            <Transcript messages={v.messages} live={v.live} />
-          {:else}
-            <div class="blank">memuat…</div>
+        <div class="node-chip">
+          <span class="dot" style:background={dot[lane.status]}></span>
+          <span class="node-name" title={lane.cwd}>{laneLabel(lane)}</span>
+          <span class="node-status">{statusLabel[lane.status] ?? lane.status}</span>
+          {#if v}
+            <button
+              class="auto"
+              class:on={v.auto}
+              onclick={() => store.setAuto(lane.sessionId, !v.auto)}
+              title={v.auto
+                ? 'Auto mode AKTIF di node ini — tool jalan tanpa minta izin.'
+                : 'Auto mode mati — tiap tool minta izin dulu.'}
+            >
+              auto {v.auto ? 'on' : 'off'}
+            </button>
           {/if}
         </div>
       {/each}
     </div>
+
+    <!-- Kartu approval tetap per-lane (bukan bagian dari transcript gabungan
+         — ini keputusan aktif yang harus jelas node mana yang menunggu),
+         bisa lebih dari satu tampil sekaligus kalau beberapa node minta
+         izin bersamaan. -->
+    {#each lanes as lane (lane.sessionId)}
+      {@const v = store.view(lane.sessionId)}
+      {@const asking = v?.pending ? askQuestions(v.pending.name, v.pending.input) : null}
+      {#if v?.pending && asking}
+        {#key v.pending.reqId}
+          <div class="approval-block">
+            <div class="approval-source">{laneLabel(lane)}</div>
+            <AskQuestions
+              questions={asking}
+              onSubmit={(answers) =>
+                store.approve(lane.sessionId, v!.pending!.reqId, 'allow', answers)}
+              onSkip={() => store.approve(lane.sessionId, v!.pending!.reqId, 'deny')}
+            />
+          </div>
+        {/key}
+      {:else if v?.pending}
+        <div class="approval">
+          <div class="approval-source">{laneLabel(lane)}</div>
+          <div class="ask">
+            <div class="asktitle">minta izin jalan</div>
+            <ToolCall
+              block={{
+                kind: 'tool',
+                id: v.pending.reqId,
+                name: v.pending.name,
+                input: v.pending.input,
+                done: true,
+              }}
+              compact
+            />
+          </div>
+          <div class="acts">
+            <button class="deny" onclick={() => store.approve(lane.sessionId, v.pending!.reqId, 'deny')}>
+              Tolak
+            </button>
+            <button class="allow" onclick={() => store.approve(lane.sessionId, v.pending!.reqId, 'allow')}>
+              Izinkan
+            </button>
+          </div>
+        </div>
+      {/if}
+    {/each}
+
+    {#if lanes.some((l) => store.view(l.sessionId)?.loaded)}
+      <Transcript
+        messages={merged.messages}
+        live={merged.live}
+        labelFor={(m) => merged.labels.get(m.id)}
+      />
+    {:else}
+      <div class="blank">memuat…</div>
+    {/if}
   {/if}
 
   <AttachChips attachments={pending} onremove={(id) => (pending = pending.filter((a) => a.id !== id))} />
@@ -357,51 +425,46 @@
     color: #4b515c;
   }
 
-  .lanes {
-    flex: 1;
+  /* Satu strip status ringkas, satu chip per node — pengganti kolom
+     berdampingan lama. Transcript-nya sendiri sudah digabung jadi satu
+     (lihat `merged` di script + <Transcript labelFor=...> di markup). */
+  .node-strip {
+    flex: none;
     display: flex;
-    min-height: 0;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 16px 0;
   }
-  .lane {
-    flex: 1 0 340px;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    border-right: 1px solid #1b1f26;
-  }
-  .lane:last-child {
-    border-right: none;
-  }
-  .lanehead {
+  .node-chip {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 7px 12px;
-    background: #12151a;
-    border-bottom: 1px solid #1b1f26;
-    font-size: 12px;
+    gap: 6px;
+    padding: 4px 8px;
+    background: #1a1d24;
+    border: 1px solid #23272f;
+    border-radius: 999px;
+    font-size: 11px;
   }
   .dot {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     flex: none;
   }
-  .lanename {
+  .node-name {
     color: #c9d1d9;
     font-weight: 600;
+    max-width: 140px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .lanestatus {
+  .node-status {
     color: #6b7280;
-    font-size: 11px;
+    font-size: 10px;
     white-space: nowrap;
   }
   .auto {
-    margin-left: auto;
     background: none;
     border: 1px solid #3a3f4a;
     color: #6b7280;
@@ -456,6 +519,20 @@
     color: #4b515c;
     cursor: default;
   }
+  .approval-block {
+    margin: 8px 16px 0;
+  }
+  .approval-source {
+    display: inline-block;
+    margin-bottom: 5px;
+    padding: 1px 6px;
+    background: #1f242c;
+    border: 1px solid #2b303a;
+    border-radius: 3px;
+    color: #a78bfa;
+    font-size: 10px;
+    font-weight: 600;
+  }
   .approval {
     display: flex;
     flex-direction: column;
@@ -505,16 +582,8 @@
     header {
       padding: 8px 12px;
     }
-    .lanes {
-      flex-direction: column;
-      overflow-x: hidden;
-      overflow-y: auto;
-    }
-    .lane {
-      flex: 1 0 auto;
-      min-height: 260px;
-      border-right: none;
-      border-bottom: 1px solid #1b1f26;
+    .node-strip {
+      padding: 8px 12px 0;
     }
     .attach-row {
       padding: 10px 12px;

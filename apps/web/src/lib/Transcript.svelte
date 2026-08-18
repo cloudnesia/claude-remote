@@ -2,7 +2,21 @@
   import type { Message } from '@company/protocol'
   import ToolCall from './ToolCall.svelte'
 
-  let { messages, live }: { messages: Message[]; live: Message | null } = $props()
+  let {
+    messages,
+    live,
+    labelFor,
+  }: {
+    messages: Message[]
+    /** Array, bukan satu — general session bisa punya beberapa node yang
+     * sama-sama sedang menjawab sekaligus, masing-masing giliran live-nya
+     * sendiri. Session biasa cukup kirim array 0-atau-1 elemen. */
+    live: Message[]
+    /** Label kecil di atas balasan (mis. nama node) — null/undefined = tidak
+     * ada label. Dipakai general session supaya jelas siapa yang menjawab
+     * di transcript gabungan; session biasa tidak perlu mengisi ini. */
+    labelFor?: (m: Message) => string | null | undefined
+  } = $props()
 
   let box = $state<HTMLDivElement | null>(null)
   let pinned = $state(true)
@@ -12,7 +26,7 @@
   // membaca ke atas, menyeret layar tiap delta itu menyebalkan.
   $effect(() => {
     // sentuh isi supaya effect ikut berjalan saat teks bertambah
-    void live?.blocks.map((b) => ('text' in b ? b.text.length : 0)).join()
+    void live.map((m) => m.blocks.map((b) => ('text' in b ? b.text.length : 0)).join()).join()
     void messages.length
 
     if (box) {
@@ -52,9 +66,13 @@
 
 <div class="wrapper">
   <div class="scroll" bind:this={box} onscroll={onScroll}>
-    {#each [...messages, ...(live ? [live] : [])] as m (m.id)}
+    {#each [...messages, ...live] as m (m.id)}
+    {@const label = labelFor?.(m)}
     <article class={m.role}>
-      <div class="who">{m.role === 'user' ? 'user' : 'claude'}</div>
+      <div class="who">
+        {m.role === 'user' ? 'user' : 'claude'}
+        {#if label}<span class="source">{label}</span>{/if}
+      </div>
       <div class="body">
         {#each m.blocks as b, i (i)}
           {#if b.kind === 'text'}
@@ -72,7 +90,7 @@
             </div>
           {/if}
         {/each}
-        {#if m === live && m.blocks.length === 0}
+        {#if live.includes(m) && m.blocks.length === 0}
           <p class="text pulse">…</p>
         {/if}
       </div>
@@ -117,6 +135,20 @@
   }
   article.user .who {
     color: #4a9eff;
+  }
+  .source {
+    display: block;
+    margin-top: 3px;
+    padding: 1px 5px;
+    background: #1f242c;
+    border: 1px solid #2b303a;
+    border-radius: 3px;
+    color: #a78bfa;
+    font-size: 9px;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: nowrap;
+    width: fit-content;
   }
   .body {
     min-width: 0;

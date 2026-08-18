@@ -78,10 +78,17 @@
     left: 50%;
     transform: translate(-50%, -50%);
     width: 380px;
+    /* Tanpa ini, di layar sempit (HP) modal 380px lebih lebar dari viewport
+       — sebagian tombolnya (mis. "Hubungkan") jatuh di luar layar dan tidak
+       bisa disentuh sama sekali. Body sekarang overflow:hidden (lihat
+       +page.svelte), jadi bagian yang meluber itu bukan cuma tidak
+       terlihat, tapi benar-benar tidak bisa dicapai. */
+    max-width: calc(100vw - 24px);
     background: #14171c;
     border: 1px solid #2b303a;
     border-radius: 10px;
     padding: 22px;
+    box-sizing: border-box;
   }
   h2 {
     margin: 0 0 8px;

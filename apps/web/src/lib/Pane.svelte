@@ -96,10 +96,6 @@
   {#if !meta}
     <div class="blank">session tidak ditemukan</div>
   {:else}
-    <header>
-      <div class="title">{meta.title}</div>
-    </header>
-
     {#if view?.pending && asking && view.canPrompt}
       <!-- key: tiap permintaan baru harus mulai dengan pilihan kosong, bukan
            mewarisi state jawaban pertanyaan sebelumnya. -->
@@ -306,22 +302,6 @@
   }
   section:last-child {
     border-right: none;
-  }
-  header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
-    padding: 11px 16px;
-    border-bottom: 1px solid #23272f;
-  }
-  .title {
-    min-width: 0;
-    font-weight: 600;
-    font-size: 14px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .status {
     font-size: 11px;
@@ -613,12 +593,6 @@
 
   /* Mobile responsive */
   @media (max-width: 768px) {
-    header {
-      padding: 8px 12px;
-    }
-    .title {
-      font-size: 15px;
-    }
     .toolbar {
       padding: 10px 12px 0;
       flex-wrap: wrap;

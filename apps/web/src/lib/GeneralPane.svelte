@@ -90,18 +90,12 @@
 
 <section>
   <header>
-    <div class="id">
-      <div class="title">
-        <span class="kind">general</span>
-        {gv?.title ?? meta?.title ?? 'General'}
-      </div>
-      <div class="sub">
-        {#if lanes.length}
-          {lanes.length} node · {lanes.map(mentionOf).join(' ')}
-        {:else}
-          belum ada node — sebut dengan @nama di prompt
-        {/if}
-      </div>
+    <div class="sub">
+      {#if lanes.length}
+        {lanes.length} node · {lanes.map(mentionOf).join(' ')}
+      {:else}
+        belum ada node — sebut dengan @nama di prompt
+      {/if}
     </div>
     <div class="right">
       {#if busy}
@@ -273,31 +267,8 @@
     padding: 11px 16px;
     border-bottom: 1px solid #23272f;
   }
-  .id {
-    min-width: 0;
-  }
-  .title {
-    font-weight: 600;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .kind {
-    font-size: 9px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: #a78bfa;
-    border: 1px solid #4c3f7a;
-    background: #241f3a;
-    border-radius: 3px;
-    padding: 1px 5px;
-    flex: none;
-  }
   .sub {
+    min-width: 0;
     font-size: 11px;
     color: #6b7280;
     font-family: ui-monospace, monospace;

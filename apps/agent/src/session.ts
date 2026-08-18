@@ -179,10 +179,19 @@ export class SessionRunner {
   }
 
   async interrupt(): Promise<void> {
+    if (!this.q) return // memang sudah tidak berjalan — bukan error
     try {
-      await this.q?.interrupt()
-    } catch {
-      /* sudah tidak berjalan */
+      await this.q.interrupt()
+    } catch (err) {
+      // Sebelumnya disembunyikan diam-diam dengan asumsi "prosesnya sudah
+      // mati" — tapi itu sudah ditangani di guard `if (!this.q)` di atas.
+      // Exception yang sampai ke sini berarti prosesnya MASIH hidup dan
+      // interrupt-nya sendiri yang gagal; itu harus kelihatan di log, kalau
+      // tidak tombol Stop tampak "tidak ngapa-ngapain" tanpa jejak kenapa.
+      console.error(
+        `[agent] gagal interrupt session ${this.sessionId.slice(0, 8)}:`,
+        (err as Error)?.message ?? err,
+      )
     }
   }
 

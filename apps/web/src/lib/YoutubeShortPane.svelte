@@ -14,8 +14,27 @@
     'jNQXAC9IVRw', // "Me at the zoo" — video pertama di YouTube
   ]
 
-  let currentId = $state(SEED_IDS[Math.floor(Math.random() * SEED_IDS.length)]!)
-  let urlInput = $state('')
+  /** Topik buat variasi tombol Acak — query-nya selalu diawali "core lucu". */
+  const RANDOM_TOPICS = [
+    'kucing',
+    'anjing',
+    'anak sekolah',
+    'receh',
+    'indonesia',
+    'gagal',
+    'prank',
+    'meme',
+    'binatang',
+    'kerja',
+  ]
+
+  type Playing = { kind: 'video'; id: string } | { kind: 'search'; query: string }
+
+  let current = $state<Playing>({
+    kind: 'video',
+    id: SEED_IDS[Math.floor(Math.random() * SEED_IDS.length)]!,
+  })
+  let queryInput = $state('')
   let error = $state('')
 
   /** Terima link video/shorts/embed YouTube, atau video ID mentah (11 karakter). */
@@ -35,28 +54,39 @@
         if (embed) return embed[1]!
       }
     } catch {
-      /* bukan URL valid — bukan error, mungkin memang cuma teks acak */
+      /* bukan URL valid — kemungkinan besar memang query pencarian biasa */
     }
     return null
   }
 
   function load(e: Event) {
     e.preventDefault()
-    const id = extractId(urlInput)
-    if (!id) {
-      error = 'Link tidak dikenali — tempel link video/Shorts YouTube, atau video ID-nya langsung.'
+    const trimmed = queryInput.trim()
+    if (!trimmed) {
+      error = 'Tulis kata kunci pencarian, atau tempel link video/Shorts YouTube.'
       return
     }
     error = ''
-    currentId = id
-    urlInput = ''
+    // Link/ID langsung tetap dilayani (praktis kalau memang sudah tahu
+    // videonya) — selain itu diperlakukan sebagai QUERY PENCARIAN lewat mode
+    // search bawaan player YouTube (listType=search), bukan cuma memuat satu
+    // video spesifik. Tidak perlu API key — ini parameter URL embed publik.
+    const id = extractId(trimmed)
+    current = id ? { kind: 'video', id } : { kind: 'search', query: trimmed }
+    queryInput = ''
   }
 
   function shuffle() {
-    let next = currentId
-    while (next === currentId) next = SEED_IDS[Math.floor(Math.random() * SEED_IDS.length)]!
-    currentId = next
+    const topic = RANDOM_TOPICS[Math.floor(Math.random() * RANDOM_TOPICS.length)]!
+    current = { kind: 'search', query: `core lucu ${topic}` }
   }
+
+  const embedSrc = $derived(
+    current.kind === 'video'
+      ? `https://www.youtube.com/embed/${current.id}?autoplay=1&mute=1&loop=1&playlist=${current.id}`
+      : `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(current.query)}&autoplay=1&mute=1`,
+  )
+  const embedKey = $derived(current.kind === 'video' ? current.id : current.query)
 </script>
 
 <section>
@@ -70,9 +100,9 @@
 
   <div class="body">
     <div class="player">
-      {#key currentId}
+      {#key embedKey}
         <iframe
-          src={`https://www.youtube.com/embed/${currentId}?autoplay=1&mute=1&loop=1&playlist=${currentId}`}
+          src={embedSrc}
           title="YouTube short"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           allowfullscreen
@@ -80,20 +110,25 @@
       {/key}
     </div>
 
+    {#if current.kind === 'search'}
+      <div class="now-playing">mencari: <strong>{current.query}</strong></div>
+    {/if}
+
     <form class="loader" onsubmit={load}>
       <input
-        bind:value={urlInput}
-        placeholder="Tempel link YouTube Shorts…"
+        bind:value={queryInput}
+        placeholder="Cari video… atau tempel link YouTube"
         autocomplete="off"
         spellcheck="false"
       />
-      <button type="submit">Muat</button>
+      <button type="submit">Cari</button>
       <button type="button" class="ghost" onclick={shuffle}>🔀 Acak</button>
     </form>
     {#if error}<div class="err">{error}</div>{/if}
     <p class="hint">
-      Fitur iseng — belum ada feed shorts sungguhan, cuma pemutar video biasa
-      yang dikunci rasio vertikal. Tempel link Shorts kamu sendiri di atas.
+      Fitur iseng — belum ada feed shorts sungguhan. Tulis kata kunci buat
+      cari (atau tempel link video/Shorts langsung), atau klik Acak buat
+      "core lucu" versi kejutan.
     </p>
   </div>
 </section>
@@ -180,6 +215,15 @@
     width: 100%;
     height: 100%;
     border: none;
+  }
+  .now-playing {
+    font-size: 11px;
+    color: #6b7280;
+    text-align: center;
+  }
+  .now-playing strong {
+    color: #c9d1d9;
+    font-weight: 600;
   }
   .loader {
     display: flex;

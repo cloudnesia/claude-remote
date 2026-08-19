@@ -57,6 +57,7 @@
     loadPlaylist: (opts: { listType: 'search'; list: string }) => void
     mute: () => void
     destroy: () => void
+    getPlayerState: () => number
   }
   declare global {
     interface Window {
@@ -65,7 +66,12 @@
     }
   }
 
+  // https://developers.google.com/youtube/iframe_api_reference#Playback_status
+  const YT_PLAYING = 1
+  const YT_BUFFERING = 3
+
   let player: YTPlayer | null = null
+  let loadTimer: ReturnType<typeof setTimeout> | null = null
 
   function loadApi(): Promise<void> {
     return new Promise((resolve) => {
@@ -86,11 +92,29 @@
     })
   }
 
+  function clearLoadTimer(): void {
+    if (loadTimer) clearTimeout(loadTimer)
+    loadTimer = null
+  }
+
   function apply(p: Playing): void {
     if (!player) return // belum siap — dipanggil ulang dari onReady begitu siap
     error = ''
+    clearLoadTimer()
     if (p.kind === 'video') player.loadVideoById(p.id)
     else player.loadPlaylist({ listType: 'search', list: p.query })
+    // Jaring pengaman: listType=search (atau video yang dibatasi) bisa gagal
+    // DIAM-DIAM — tidak selalu memicu onError. Kalau belum juga mulai
+    // buffering/main setelah beberapa detik, anggap gagal dan kasih tahu di
+    // panel, bukan dibiarkan menggantung kosong tanpa penjelasan.
+    loadTimer = setTimeout(() => {
+      const state = player?.getPlayerState()
+      if (state === YT_PLAYING || state === YT_BUFFERING) return
+      error =
+        p.kind === 'search'
+          ? `Tidak ada hasil buat "${p.query}" — mode pencarian ini kadang dibatasi YouTube. Coba kata kunci lain, tempel link langsung, atau klik Acak.`
+          : 'Video ini tidak kunjung main — coba lagi atau klik Acak.'
+    }, 6000)
   }
 
   onMount(() => {
@@ -106,10 +130,17 @@
             player?.mute()
             apply(current) // baca current TERKINI, bukan yang di-capture saat mount
           },
+          onStateChange: (e: { data: number }) => {
+            if (e.data === YT_PLAYING || e.data === YT_BUFFERING) {
+              clearLoadTimer()
+              error = ''
+            }
+          },
           onError: () => {
             // Kode 100/101/150 = video dihapus/private/embedding dimatikan
             // pemiliknya. Ditangani DI SINI (di dalam panel), bukan biarkan
             // YouTube redirect ke halaman/tab baru seperti pendekatan lama.
+            clearLoadTimer()
             error = 'Video ini tidak bisa diputar di sini — coba lagi atau klik Acak.'
           },
         },
@@ -121,6 +152,7 @@
   })
 
   onDestroy(() => {
+    clearLoadTimer()
     player?.destroy()
     player = null
   })
@@ -293,10 +325,20 @@
     width: 100%;
     height: 100%;
   }
-  /* YT.Player mengganti .player-mount dengan <iframe> di luar kendali Svelte
-     (bukan yang kita tulis di markup) — :global wajib supaya style ini tetap
-     kena. */
-  .player-mount :global(iframe) {
+  /*
+   * BUG SEBELUMNYA: selector di sini `.player-mount :global(iframe)` —
+   * mengasumsikan iframe jadi ANAK .player-mount. Yang benar-benar terjadi:
+   * YT.Player MENGGANTI elemen .player-mount itu sendiri dengan <iframe>
+   * (elemen div-nya lenyap dari DOM, <iframe> menempati posisi yang sama
+   * sebagai anak LANGSUNG .player) — dikonfirmasi di dokumentasi resminya:
+   * "the API will replace that element with the <iframe> element". Selector
+   * lama itu TIDAK PERNAH cocok, jadi <iframe> hasil YT.Player render tanpa
+   * style sama sekali — jatuh ke ukuran default width/height dari opsi
+   * constructor (100×100px), kotak kecil yang gampang disangka "videonya
+   * tidak muncul". Diperbaiki: sasar turunan .player (wrapper yang memang
+   * tidak pernah diganti), bukan .player-mount yang bisa hilang.
+   */
+  .player :global(iframe) {
     position: absolute;
     inset: 0;
     width: 100% !important;

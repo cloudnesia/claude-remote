@@ -122,7 +122,7 @@
   <div class="branding">
     <div class="app-info">
       <div class="app-name">claude-remote</div>
-      <div class="app-version">v0.12.2</div>
+      <div class="app-version">v0.12.3</div>
     </div>
     <div class="branding-right">
       <a

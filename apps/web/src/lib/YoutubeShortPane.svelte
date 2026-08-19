@@ -1,12 +1,15 @@
 <script lang="ts">
+  import { onDestroy, onMount } from 'svelte'
+
   let { onclose }: { onclose: () => void } = $props()
 
   /**
    * Belum ada API resmi buat "feed shorts acak" yang bisa di-embed gratis —
    * ini cuma pemutar video biasa dikunci rasio vertikal 9:16. Tiga ID di
    * bawah sengaja video yang PASTI tidak akan pernah dihapus/pindah (umurnya
-   * puluhan tahun, jutaan/miliaran views, kanal resmi) — dipakai sebagai
-   * contoh awal sebelum user tempel link Shorts sungguhan miliknya sendiri.
+   * puluhan tahun, jutaan/miliaran views, kanal resmi, dan embedding-nya
+   * tidak pernah dimatikan pemiliknya) — dipakai sebagai contoh awal sebelum
+   * user cari sesuatu sendiri.
    */
   const SEED_IDS = [
     'dQw4w9WgXcQ', // Rick Astley — Never Gonna Give You Up
@@ -37,6 +40,98 @@
   let queryInput = $state('')
   let error = $state('')
 
+  let containerEl: HTMLDivElement | undefined = $state()
+
+  /**
+   * Sebelumnya pakai iframe src mentah (`youtube.com/embed?listType=search&list=...`)
+   * — TERNYATA tidak benar-benar didukung tanpa lewat JS API-nya: yang muncul
+   * "Video unavailable" dan link "Watch on YouTube" yang membuka tab baru,
+   * bukan pemutar yang jalan di panel ini. `listType=search` cuma didukung
+   * resmi lewat method `loadPlaylist()` milik YT.Player — makanya sekarang
+   * pakai IFrame Player API sungguhan (dimuat dinamis), bukan src statis.
+   * SDK resminya tidak menyediakan types, dan nambah paket npm cuma buat
+   * ini berlebihan — jadi minimal typing tangan di bawah.
+   */
+  type YTPlayer = {
+    loadVideoById: (id: string) => void
+    loadPlaylist: (opts: { listType: 'search'; list: string }) => void
+    mute: () => void
+    destroy: () => void
+  }
+  declare global {
+    interface Window {
+      YT?: { Player: new (el: HTMLElement, opts: Record<string, unknown>) => YTPlayer }
+      onYouTubeIframeAPIReady?: () => void
+    }
+  }
+
+  let player: YTPlayer | null = null
+
+  function loadApi(): Promise<void> {
+    return new Promise((resolve) => {
+      if (window.YT?.Player) return resolve()
+      if (!document.getElementById('yt-iframe-api')) {
+        const s = document.createElement('script')
+        s.id = 'yt-iframe-api'
+        s.src = 'https://www.youtube.com/iframe_api'
+        document.head.appendChild(s)
+      }
+      // Callback global bawaan YouTube — cuma boleh ada SATU per halaman, jadi
+      // rantai ke yang lama (kalau ada) alih-alih menimpanya begitu saja.
+      const prev = window.onYouTubeIframeAPIReady
+      window.onYouTubeIframeAPIReady = () => {
+        prev?.()
+        resolve()
+      }
+    })
+  }
+
+  function apply(p: Playing): void {
+    if (!player) return // belum siap — dipanggil ulang dari onReady begitu siap
+    error = ''
+    if (p.kind === 'video') player.loadVideoById(p.id)
+    else player.loadPlaylist({ listType: 'search', list: p.query })
+  }
+
+  onMount(() => {
+    let cancelled = false
+    loadApi().then(() => {
+      if (cancelled || !containerEl) return
+      player = new window.YT!.Player(containerEl, {
+        width: '100',
+        height: '100',
+        playerVars: { autoplay: 1, mute: 1, playsinline: 1, origin: location.origin },
+        events: {
+          onReady: () => {
+            player?.mute()
+            apply(current) // baca current TERKINI, bukan yang di-capture saat mount
+          },
+          onError: () => {
+            // Kode 100/101/150 = video dihapus/private/embedding dimatikan
+            // pemiliknya. Ditangani DI SINI (di dalam panel), bukan biarkan
+            // YouTube redirect ke halaman/tab baru seperti pendekatan lama.
+            error = 'Video ini tidak bisa diputar di sini — coba lagi atau klik Acak.'
+          },
+        },
+      })
+    })
+    return () => {
+      cancelled = true
+    }
+  })
+
+  onDestroy(() => {
+    player?.destroy()
+    player = null
+  })
+
+  // Player belum tentu siap saat efek ini pertama jalan (apply() no-op kalau
+  // begitu, aman) — begitu onReady memanggil apply(current) sendiri, lalu tiap
+  // `current` berubah setelahnya efek ini yang meneruskannya ke player.
+  $effect(() => {
+    apply(current)
+  })
+
   /** Terima link video/shorts/embed YouTube, atau video ID mentah (11 karakter). */
   function extractId(input: string): string | null {
     const trimmed = input.trim()
@@ -66,11 +161,8 @@
       error = 'Tulis kata kunci pencarian, atau tempel link video/Shorts YouTube.'
       return
     }
-    error = ''
     // Link/ID langsung tetap dilayani (praktis kalau memang sudah tahu
-    // videonya) — selain itu diperlakukan sebagai QUERY PENCARIAN lewat mode
-    // search bawaan player YouTube (listType=search), bukan cuma memuat satu
-    // video spesifik. Tidak perlu API key — ini parameter URL embed publik.
+    // videonya) — selain itu diperlakukan sebagai QUERY PENCARIAN.
     const id = extractId(trimmed)
     current = id ? { kind: 'video', id } : { kind: 'search', query: trimmed }
     queryInput = ''
@@ -80,13 +172,6 @@
     const topic = RANDOM_TOPICS[Math.floor(Math.random() * RANDOM_TOPICS.length)]!
     current = { kind: 'search', query: `core lucu ${topic}` }
   }
-
-  const embedSrc = $derived(
-    current.kind === 'video'
-      ? `https://www.youtube.com/embed/${current.id}?autoplay=1&mute=1&loop=1&playlist=${current.id}`
-      : `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(current.query)}&autoplay=1&mute=1`,
-  )
-  const embedKey = $derived(current.kind === 'video' ? current.id : current.query)
 </script>
 
 <section>
@@ -100,14 +185,7 @@
 
   <div class="body">
     <div class="player">
-      {#key embedKey}
-        <iframe
-          src={embedSrc}
-          title="YouTube short"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowfullscreen
-        ></iframe>
-      {/key}
+      <div class="player-mount" bind:this={containerEl}></div>
     </div>
 
     {#if current.kind === 'search'}
@@ -209,12 +287,22 @@
     box-shadow: 0 10px 34px rgba(0, 0, 0, 0.45);
     flex: none;
   }
-  .player iframe {
+  .player-mount {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
+  }
+  /* YT.Player mengganti .player-mount dengan <iframe> di luar kendali Svelte
+     (bukan yang kita tulis di markup) — :global wajib supaya style ini tetap
+     kena. */
+  .player-mount :global(iframe) {
+    position: absolute;
+    inset: 0;
+    width: 100% !important;
+    height: 100% !important;
     border: none;
+    display: block;
   }
   .now-playing {
     font-size: 11px;
